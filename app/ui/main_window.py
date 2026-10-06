@@ -3680,6 +3680,14 @@ class MainWindow(QMainWindow):
                         self._handle_magic_docker(sid, payload), name="mdocker"
                     )
                 )
+            if hasattr(term, "magic_command"):
+                # Browser-side OSC 777 fallback for sequences that do not reach
+                # the Python stream parser intact.
+                term.magic_command.connect(
+                    lambda payload, sid=session.id: self._spawn(
+                        self._handle_magic_docker(sid, payload), name="mdocker-xterm"
+                    )
+                )
             # Secondary: xterm.js OSC handler (backup)
             if hasattr(term, "cwd_changed"):
                 term.cwd_changed.connect(lambda path, sid=session.id: self._terminal_cwd_changed(sid, path))
