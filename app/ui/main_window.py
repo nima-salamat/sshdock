@@ -4253,19 +4253,12 @@ class MainWindow(QMainWindow):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            log.exception("Server process list failed")
-            self.process_table.setRowCount(0)
-            r = self.process_table.rowCount()
-            self.process_table.insertRow(r)
-            self.process_table.setSpan(r, 0, 1, self.process_table.columnCount())
-            item = QTableWidgetItem(f"Could not load processes: {exc}")
-            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.process_table.setItem(r, 0, item)
+            log.warning("Server process list refresh failed: %s", exc)
+            self.statusBar().showMessage(f"Process refresh failed: {str(exc)[:160]}", 5000)
         finally:
             self._server_process_loading = False
 
     async def _load_services(self):
-        # Clear BEFORE fetching so stale data doesn't persist on failure.
         try:
             # run_page keeps page-level SSH concurrency bounded by Settings.
             s = await self.manager.servers[self.current_id].ssh.run_page(
