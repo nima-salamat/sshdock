@@ -378,6 +378,8 @@ class _EditorWorkspace(QWidget):
                 text = f"Downloading · {percent}% · {_human_size(done)} / {_human_size(total)} · {_human_size(rate)}/s"
                 transfer_status.setText(text)
                 preview_status.setText(text)
+                if player is not None:
+                    _try_video()
                 if image_label is not None and os.path.exists(temp_path):
                     try:
                         pixmap = QPixmap(temp_path)
@@ -392,23 +394,27 @@ class _EditorWorkspace(QWidget):
                     except Exception:
                         pass
 
-            async def _try_video():
-                if player is None or not os.path.exists(temp_path):
+            def _try_video():
+                if player is None or QUrl is None or not os.path.exists(temp_path):
                     return
                 try:
                     size = os.path.getsize(temp_path)
                 except OSError:
                     return
+                # Try progressive playback once the container has a useful amount
+                # of data. Some formats require the final index and will simply
+                # stay paused until the download completes.
                 if size < 64 * 1024:
                     return
                 try:
                     if player.source().isEmpty():
                         player.setSource(QUrl.fromLocalFile(temp_path))
+                    if player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
                         player.play()
+                        preview_status.setText("Playing while downloading…")
                 except Exception:
                     pass
 
-            record["stop"] = lambda: (task.cancel() if record.get("task") is not None else None)
             try:
                 await self.backend.download(path, temp_path, progress_handler=progress)
                 if player is not None:
@@ -428,18 +434,18 @@ class _EditorWorkspace(QWidget):
                         pass
                 transfer_status.setText("Ready")
                 preview_status.setText("Download complete")
-                stop_download.setText("Close preview")
+                stop_download.setText("Clear media")
                 try:
                     stop_download.clicked.disconnect()
                 except Exception:
                     pass
                 stop_download.clicked.connect(lambda: self._cleanup_record(path))
                 if player is not None:
-                    await _try_video()
+                    _try_video()
             except asyncio.CancelledError:
                 transfer_status.setText("Stopped")
                 preview_status.setText("Download stopped")
-                stop_download.setText("Close preview")
+                stop_download.setText("Clear media")
                 try:
                     stop_download.clicked.disconnect()
                 except Exception:
@@ -449,7 +455,7 @@ class _EditorWorkspace(QWidget):
             except Exception as exc:
                 transfer_status.setText("Failed")
                 preview_status.setText(f"Download failed: {str(exc)[:160]}")
-                stop_download.setText("Close preview")
+                stop_download.setText("Clear media")
                 try:
                     stop_download.clicked.disconnect()
                 except Exception:
