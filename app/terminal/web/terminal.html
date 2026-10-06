@@ -373,6 +373,27 @@
         }, {passive: false});
       }
 
+      // Keep the scrollbar synchronized with normal terminal output even when
+      // no magic table has ever been rendered. xterm documents onWriteParsed
+      // as the buffer-change event, while onRender covers repaint-driven
+      // viewport updates.
+      if (!term._sshdockScrollBarHook) {
+        term._sshdockScrollBarHook = true;
+        try { term.onWriteParsed(function(){ syncScrollBar(); }); } catch (e) {}
+        try { term.onRender(function(){ syncScrollBar(); }); } catch (e) {}
+        try { term.onScroll(function(){ syncScrollBar(); }); } catch (e) {}
+        window.addEventListener('resize', function(){ syncScrollBar(); });
+        if (window.ResizeObserver) {
+          try {
+            new ResizeObserver(function(){ syncScrollBar(); }).observe(
+              document.getElementById('term-root') || document.getElementById('terminal')
+            );
+          } catch (e) {}
+        }
+        setTimeout(syncScrollBar, 0);
+        requestAnimationFrame(syncScrollBar);
+      }
+
       let bridge = null;
       function reportCwdFromOsc(data) {
         try {
@@ -476,10 +497,7 @@
               // to the same prompt even when window width changes.
               anchorMarker = term.registerMarker(0);
             } catch (e) {}
-            const startAbs = Math.max(
-              0,
-              anchorMarker && anchorMarker.line >= 0 ? anchorMarker.line - RESERVE : promptAbs - RESERVE
-            );
+            const startAbs = Math.max(0, promptAbs - RESERVE);
 
             function esc(s) {
               return String(s == null ? '' : s)
@@ -508,6 +526,7 @@
             const block = document.createElement('div');
             block.className = 'sshdock-tbl';
             block._startAbs = startAbs;
+            block._anchorPromptAbs = promptAbs;
             block._cells = RESERVE;
             block._anchorMarker = anchorMarker;
 
@@ -622,11 +641,13 @@
                   continue;
                 }
                 const markerLine = b._anchorMarker ? b._anchorMarker.line : -1;
-                if (b._anchorMarker && markerLine < 0) {
-                  b.style.display = 'none';
-                  continue;
-                }
-                const start = markerLine >= 0 ? Math.max(0, markerLine - (b._cells|RESERVE)) : (b._startAbs|0);
+                // A marker is only a reflow aid. If xterm disposes it after
+                // trimming, keep the last known anchor instead of hiding the
+                // whole result table.
+                const anchor = markerLine >= 0
+                  ? Math.max(0, markerLine - (b._cells|RESERVE))
+                  : Math.max(0, b._startAbs|0);
+                const start = anchor;
                 b._startAbs = start;
                 const cells=b._cells|RESERVE;
                 const top=(start-viewportY)*ch;
@@ -646,10 +667,7 @@
             if (!term._sshdockScrollHook) {
               term._sshdockScrollHook = true;
               try {
-                term.onScroll(function(){
-                  sync();
-                  syncScrollBar();
-                });
+                term.onScroll(function(){ sync(); });
               } catch(e){}
               // xterm.js exposes normal/alternate buffer transitions directly.
               // This is the reliable generic signal for full-screen terminal apps.
