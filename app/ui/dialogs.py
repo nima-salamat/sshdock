@@ -36,9 +36,15 @@ def _field_help(tip: str) -> QLabel:
     lbl.setToolTip(tip)
     lbl.setToolTipDuration(1200)  # ms — much faster than Qt default (~700ms+ hold)
     lbl.setCursor(Qt.CursorShape.WhatsThisCursor)
-    lbl.setStyleSheet(
-        "background:#1d2530; color:#9fb0c3; border-radius:9px; font-size:11px; font-weight:700;"
-    )
+    theme = str(QApplication.instance().property("sshdockTheme") or "dark").lower() if QApplication.instance() else "dark"
+    if theme == "light":
+        lbl.setStyleSheet(
+            "background:#e2e8f0; color:#334155; border-radius:9px; font-size:11px; font-weight:700;"
+        )
+    else:
+        lbl.setStyleSheet(
+            "background:#1d2530; color:#9fb0c3; border-radius:9px; font-size:11px; font-weight:700;"
+        )
     return lbl
 
 
@@ -57,7 +63,8 @@ class ErrorDialog(QDialog):
 
         header = QHBoxLayout()
         icon = QLabel("⚠")
-        icon.setStyleSheet("font-size:28px; color:#ff939b;")
+        icon.setObjectName("errorIcon")
+        icon.setStyleSheet("font-size:28px;")
         header.addWidget(icon)
         title_lbl = QLabel(title or "Something went wrong")
         title_lbl.setStyleSheet("font-size:18px; font-weight:700;")
@@ -66,7 +73,8 @@ class ErrorDialog(QDialog):
 
         msg = QLabel(message or "")
         msg.setWordWrap(True)
-        msg.setStyleSheet("color:#e9edf2; font-size:13px;")
+        msg.setObjectName("errorMessage")
+        msg.setStyleSheet("font-size:13px;")
         root.addWidget(msg)
 
         # Always build a full copyable report (title + message + details)
@@ -77,14 +85,13 @@ class ErrorDialog(QDialog):
 
         frame = QFrame()
         frame.setObjectName("panel")
-        frame.setStyleSheet(
-            "#panel { background:#0d1014; border:1px solid #2a313a; border-radius:8px; }"
-        )
+        frame.setStyleSheet("")
         fl = QVBoxLayout(frame)
         fl.setContentsMargins(10, 8, 10, 8)
         fl.setSpacing(6)
         lbl = QLabel("Details (selectable / copyable)")
-        lbl.setStyleSheet("color:#8a95a4; font-size:11px; font-weight:600;")
+        lbl.setObjectName("muted")
+        lbl.setStyleSheet("font-size:11px; font-weight:600;")
         fl.addWidget(lbl)
         self.details_edit = QTextEdit()
         self.details_edit.setReadOnly(True)
@@ -100,7 +107,8 @@ class ErrorDialog(QDialog):
         copy_btn = QPushButton("Copy")
         if qta:
             try:
-                copy_btn.setIcon(qta.icon("fa5s.copy", color="#dbe7f5"))
+                theme = str(QApplication.instance().property("sshdockTheme") or "dark").lower()
+                copy_btn.setIcon(qta.icon("fa5s.copy", color="#475569" if theme == "light" else "#dbe7f5"))
             except Exception:
                 pass
         copy_btn.clicked.connect(self._copy)
@@ -161,7 +169,8 @@ class ConfirmRemoveDialog(QDialog):
 
         if len(names) > 1 and len(names) <= 12:
             listing = QLabel("\n".join(f"• {n}" for n in names))
-            listing.setStyleSheet("color:#9ca7b5; font-size:12px;")
+            listing.setObjectName("muted")
+            listing.setStyleSheet("font-size:12px;")
             listing.setWordWrap(True)
             root.addWidget(listing)
         elif len(names) > 12:
@@ -175,7 +184,8 @@ class ConfirmRemoveDialog(QDialog):
             "If a container is still running, enable Force to stop and remove it."
         )
         hint.setWordWrap(True)
-        hint.setStyleSheet("color:#8a95a4; font-size:12px;")
+        hint.setObjectName("muted")
+        hint.setStyleSheet("font-size:12px;")
         root.addWidget(hint)
 
         self.force_cb = QCheckBox("Force remove (-f) — stop and remove even if running")
@@ -1382,9 +1392,12 @@ class ConnectionDialog(QDialog):
         self.advanced_frame.setVisible(checked)
         self.adv_toggle.setText("▾  Advanced options" if checked else "▸  Advanced options")
 
-    def _icon(self, name: str, color: str = "#c5d0de"):
+    def _icon(self, name: str, color: str | None = None):
         try:
             import qtawesome as qta
+            if color is None:
+                theme = str(QApplication.instance().property("sshdockTheme") or "dark").lower() if QApplication.instance() else "dark"
+                color = "#475569" if theme == "light" else "#c5d0de"
             return qta.icon(name, color=color)
         except Exception:
             return QIcon()
