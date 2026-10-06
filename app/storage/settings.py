@@ -16,6 +16,7 @@ _DEFAULT_UI: dict[str, Any] = {
     "terminal_font_size": 13,
     "notifications_enabled": True,
     "worker_shell_count": 3,
+    "remote_agent_enabled": False,
 }
 
 
