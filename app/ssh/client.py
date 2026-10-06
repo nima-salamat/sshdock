@@ -586,10 +586,12 @@ class SSHServerConnection:
                     ConnectionErrorInfo(title, title, reason, retryable=retryable)
                 ) from exc
 
-    async def open_shell(self, cols=120, rows=32):
+    async def open_shell(self, cols=120, rows=32, *, command=None, env=None):
         if not self.is_connected:
             raise RuntimeError("SSH connection is not established")
         create = self.connection.create_process(
+            command=command if command is not None else (),
+            env=env or (),
             term_type="xterm-256color",
             term_size=(cols, rows),
             encoding="utf-8",
