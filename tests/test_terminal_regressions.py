@@ -94,3 +94,24 @@ def test_process_sigint_uses_normal_graceful_shutdown_path():
     assert "main_window.close()" in src
     assert 'widget.__class__.__name__ == "ConnectionDialog"' in src
     assert "restore_signal_handlers()" in src
+
+
+def test_terminal_explorer_uses_list_parent_and_collapsible_search():
+    src = (ROOT / "app/files/terminal_explorer.py").read_text(encoding="utf-8")
+    assert 'fa5s.search' in src
+    assert 'self.search_btn.setCheckable(True)' in src
+    assert 'self.search.setVisible(False)' in src
+    assert 'self.search_btn.isChecked()' in src
+    assert 'self.search.clear()' in src
+    assert 'QTreeWidgetItem([".."])' in src
+    assert '"parent": True' in src
+    assert 'terminalExplorerPathLabel' in src
+    assert 'self.path_edit' not in src
+    assert 'self.up_btn' not in src
+
+
+def test_terminal_explorer_search_matches_path_and_type():
+    src = (ROOT / "app/files/terminal_explorer.py").read_text(encoding="utf-8")
+    assert 'str(data.path or "")' in src
+    assert '"directory" if data.is_dir else "file"' in src
+    assert 'ft.key' in src
