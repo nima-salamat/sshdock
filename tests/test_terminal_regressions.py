@@ -127,6 +127,24 @@ def test_process_sigint_uses_normal_graceful_shutdown_path():
     assert "restore_signal_handlers()" in src
 
 
+def test_terminal_explorer_has_unified_upload_and_creation_actions():
+    src = (ROOT / "app/files/terminal_explorer.py").read_text(encoding="utf-8")
+    assert "class _UploadSelectionDialog(QDialog):" in src
+    assert 'add_files.clicked.connect(self._add_files)' in src
+    assert 'add_folder.clicked.connect(self._add_folder)' in src
+    assert "self.selected_paths" in src
+    assert 'self.new_folder_btn = self._button("fa5s.folder-plus"' in src
+    assert 'self.new_file_btn = self._button("fa5s.file"' in src
+    assert 'self.upload_btn = self._button("fa5s.upload"' in src
+    assert 'self.download_btn = self._button("fa5s.download"' in src
+    assert "self.upload_folder_btn" not in src
+    assert 'self.count_label.setText(f"{visible} items · shell cwd")' in src
+    assert "async def new_folder(self):" in src
+    assert "async def new_file(self):" in src
+    assert "await self.backend.mkdir(path)" in src
+    assert 'await self.backend.write_text(path, "")' in src
+    assert "self._spawn(self._open_file(Entry(" in src
+
 def test_terminal_explorer_uses_list_parent_and_collapsible_search():
     src = (ROOT / "app/files/terminal_explorer.py").read_text(encoding="utf-8")
     assert 'fa5s.search' in src
