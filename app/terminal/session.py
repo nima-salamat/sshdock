@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import posixpath
 from uuid import uuid4
 
 from app.terminal.docker_pretty import install_command
@@ -70,84 +69,46 @@ class TerminalSession(QObject):
             self.status.emit(f"● Failed: {exc}")
             raise
 
-    async def _detect_shell(self) -> str:
-        """Detect the user's login shell without changing the interactive PTY."""
-        try:
-            result = await self.ssh.run_fast(
-                "printf '%s' \"${SHELL:-/bin/sh}\"",
-                timeout=3,
-            )
-            shell = (result.stdout or "").strip()
-            if posixpath.basename(shell) in {"bash", "zsh", "fish", "sh", "dash", "ksh"}:
-                return shell
-        except Exception:
-            pass
-        return "/bin/sh"
-
     async def _install_shell_integration(self):
-        """Augment the live shell without replacing user startup files."""
+        """Install SSHDock terminal integration on the already-running user shell.
+
+        The shell itself is never replaced, so the user's normal startup files,
+        aliases, functions, PATH, and installed prompt tooling remain available.
+        """
         if not self.channel or self.channel.closed:
             return
 
-        shell = await self._detect_shell()
-        shell_name = posixpath.basename(shell)
-        if shell_name == "fish":
-            setup_parts = [
-                "stty -echo 2>/dev/null",
-                "set -gx TERM xterm-256color",
-                "set -gx COLORTERM truecolor",
-                "set -gx CLICOLOR 1",
-                "function __sshdock_cwd; printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; end",
-                "function __sshdock_cwd_prompt --on-event fish_prompt; __sshdock_cwd; end",
-                "function mdocker; if test (count $argv) -lt 1; printf 'usage: mdocker <ps|images|volume|network|stats|compose|service|system|context|plugin|node|stack|secret|config> [args]\\n' >&2; return 1; end; printf '\\033]777;sshdock-magic;%s\\007' (string join ' ' -- $argv); string repeat -n 20 \\n; end",
-                "alias mdps 'mdocker ps' 2>/dev/null",
-                "alias mdpa 'mdocker ps -a' 2>/dev/null",
-                "alias mdimg 'mdocker images' 2>/dev/null",
-                "alias mdvol 'mdocker volume ls' 2>/dev/null",
-                "alias mdnet 'mdocker network ls' 2>/dev/null",
-                "alias mdstats 'mdocker stats' 2>/dev/null",
-                "__sshdock_cwd",
-                "stty echo 2>/dev/null",
-            ]
-        else:
-            setup_parts = [
-                "stty -echo 2>/dev/null",
-                "export TERM=xterm-256color COLORTERM=truecolor CLICOLOR=1",
-                "__sshdock_cwd(){ printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; }",
-            ]
-            if shell_name == "bash":
-                setup_parts.extend([
-                    "if declare -p PROMPT_COMMAND 2>/dev/null | grep -q 'declare -a'; then case \" ${PROMPT_COMMAND[*]} \" in *\" __sshdock_cwd \"*) ;; *) PROMPT_COMMAND+=(__sshdock_cwd);; esac; else case \";${PROMPT_COMMAND:-};\" in *\";__sshdock_cwd;\"*) ;; *) PROMPT_COMMAND=\"__sshdock_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}\";; esac; fi",
-                    "case \"${PS1:-}\" in ''|'\\u@\\h:\\w\\$ ') PS1='\\[\\033[01;32m\\]\\u@\\h\\[\\033[00m\\]:\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\$ ';; esac",
-                ])
-            elif shell_name == "zsh":
-                setup_parts.extend([
-                    "autoload -Uz add-zsh-hook 2>/dev/null; if type add-zsh-hook >/dev/null 2>&1; then add-zsh-hook precmd __sshdock_cwd; else typeset -ga precmd_functions; case \" ${precmd_functions[*]} \" in *\" __sshdock_cwd \"*) ;; *) precmd_functions+=(__sshdock_cwd);; esac; fi",
-                    "case \"${PROMPT:-}\" in ''|'%n@%m:%~%# ') PROMPT='%F{green}%n@%m%f:%F{blue}%~%f%# ';; esac",
-                ])
-            else:
-                setup_parts.extend([
-                    "case \"${PS1:-}\" in '') _sshdock_g=$(printf '\\033[01;32m'); _sshdock_b=$(printf '\\033[01;34m'); _sshdock_r=$(printf '\\033[00m'); PS1=\"${_sshdock_g}${USER:-$(id -un)}@$(hostname):${_sshdock_b}\\w${_sshdock_r}$$ \";; esac",
-                ])
-
-            setup_parts.extend([
-                "alias ls='ls --color=auto' 2>/dev/null",
-                "alias grep='grep --color=auto' 2>/dev/null",
-                "alias fgrep='fgrep --color=auto' 2>/dev/null",
-                "alias egrep='egrep --color=auto' 2>/dev/null",
-                "alias ll='ls -alF --color=auto' 2>/dev/null",
-                "alias la='ls -A --color=auto' 2>/dev/null",
-                "command -v dircolors >/dev/null 2>&1 && eval \"$(dircolors -b 2>/dev/null)\"",
-                install_command(),
-                "__sshdock_cwd",
-                "stty echo 2>/dev/null",
-                "printf '\\r\\033[K'\\r",
-            ])
-        setup = "; ".join(p for p in setup_parts if p)
+        setup = (
+            "stty -echo 2>/dev/null; "
+            "export TERM=xterm-256color COLORTERM=truecolor; "
+            "export CLICOLOR=1; "
+            "__sshdock_cwd(){ printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; }; "
+            "PROMPT_COMMAND=\"__sshdock_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}\"; "
+            "precmd_functions=(__sshdock_cwd); "
+            "PS1='\\[\\033[01;32m\\]\\u@\\h\\[\\033[00m\\]:\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\$ '; "
+            "alias ls='ls --color=auto' 2>/dev/null; "
+            "alias grep='grep --color=auto' 2>/dev/null; "
+            "alias fgrep='fgrep --color=auto' 2>/dev/null; "
+            "alias egrep='egrep --color=auto' 2>/dev/null; "
+            "alias ll='ls -alF --color=auto' 2>/dev/null; "
+            "alias la='ls -A --color=auto' 2>/dev/null; "
+            "command -v dircolors >/dev/null 2>&1 && eval \"$(dircolors -b 2>/dev/null)\"; "
+            "__sshdock_cwd; "
+            "stty echo 2>/dev/null; "
+            "printf '\\r\\033[K'\\r"
+        )
         try:
-            await asyncio.wait_for(self.channel.write((setup + "\r").encode("utf-8")), timeout=5.0)
+            await asyncio.wait_for(self.channel.write(setup.encode("utf-8")), timeout=2.5)
         except Exception:
             pass
+        try:
+            from app.terminal.docker_pretty import install_command
+            pretty = install_command() + "\r"
+            await asyncio.sleep(0.05)
+            await asyncio.wait_for(self.channel.write(pretty.encode("utf-8")), timeout=3.0)
+        except Exception:
+            pass
+
     def _extract_cwd(self, data: bytes) -> bytes:
         """Parse OSC 7 (cwd) + OSC 777 magic; strip magic from stream."""
         blob = self._osc_buf + data
