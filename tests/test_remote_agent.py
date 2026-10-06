@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import struct
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -52,24 +53,26 @@ def test_remote_agent_toggle_does_not_start_when_disconnected():
     assert connection.remote_agent_enabled is True
     assert connection.remote_agent_connected is False
 
-def test_terminal_bootstrap_does_not_write_setup_commands_to_pty():
-    from pathlib import Path
-    text = Path("app/terminal/session.py").read_text(encoding="utf-8")
+def test_terminal_bootstrap_preserves_user_shell_startup():
+    text = (Path(__file__).parents[1] / "app/terminal/session.py").read_text(encoding="utf-8")
     start = text.index("    async def start(self):")
     end = text.index("    def _extract_cwd", start)
     body = text[start:end]
-    assert "self.channel.write(" not in body
-    assert "await asyncio.sleep(0.15)" not in body
-    assert "_prepare_shell_bootstrap" in body
-    assert "_write_bootstrap" in body
+    assert "self.channel = await self.ssh.open_shell()" in body
+    assert "await asyncio.sleep(0.15)" in body
+    assert "await self._install_shell_integration()" in body
+    assert "--noprofile" not in body
+    assert "--rcfile" not in body
+    assert "ZDOTDIR=" not in body
 
 
-def test_terminal_bootstrap_uses_non_pty_exec_and_controlled_bash_rc():
-    from pathlib import Path
-    text = Path("app/terminal/session.py").read_text(encoding="utf-8")
-    assert 'self.ssh.start_command("cat > " + shlex.quote(path))' in text
-    assert "--noprofile --rcfile" in text
-    assert "DOCKER_PRETTY_SH" in text
+def test_terminal_bootstrap_keeps_integration_on_the_live_shell():
+    text = (Path(__file__).parents[1] / "app/terminal/session.py").read_text(encoding="utf-8")
+    assert "async def _install_shell_integration(self):" in text
+    assert 'install_command()' in text
+    assert "stty -echo 2>/dev/null" in text
+    assert "self.ssh.start_command(" not in text
+    assert "DOCKER_PRETTY_SH" not in text
 
 
 def test_containers_use_native_qt_checkbox_state_api():
