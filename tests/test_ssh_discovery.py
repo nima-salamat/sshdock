@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from app.ssh.discovery import discover_aliases
@@ -33,7 +34,10 @@ Host prod
     assert alias.host == "203.0.113.10"
     assert alias.user == "deploy"
     assert alias.port == 2200
-    assert alias.identity_files == ["~/.ssh/id_ed25519", "~/.ssh/id_rsa"]
+    assert alias.identity_files == [
+        os.path.expanduser("~/.ssh/id_ed25519"),
+        os.path.expanduser("~/.ssh/id_rsa"),
+    ]
     assert alias.identities_only is True
     assert alias.proxy_jump == "bastion"
     assert alias.forward_agent is True

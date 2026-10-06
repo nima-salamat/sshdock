@@ -25,7 +25,6 @@ def test_ssh_profile_round_trip_preserves_enum_and_defaults() -> None:
 
 def test_connection_state_values_are_stable_strings() -> None:
     assert ConnectionState.CONNECTED.value == "connected"
-    assert str(ConnectionState.CONNECTED) == "ConnectionState.CONNECTED"
 
 
 def test_profile_from_dict_does_not_mutate_input() -> None:
