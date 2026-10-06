@@ -111,7 +111,6 @@ QSplitter::handle:vertical {
 }
 QSplitter::handle:vertical:hover { background: #3b82f6; }
 QSplitter::handle:vertical:pressed { background: #2563eb; }
-"""
 /* Shared file/terminal workspace controls */
 QToolButton#feNav { background:transparent; border:none; border-radius:6px; padding:3px; min-width:26px; min-height:26px; color:#c5d0de; }
 QToolButton#feNav:hover { background:#1c2430; }
@@ -147,6 +146,7 @@ QTreeWidget#terminalExplorerTree::item:selected { background:#1d3857; color:#fff
 
 
 
+"""
 LIGHT = """
 QWidget { background:#f4f6f9; color:#1e293b; font-family:'Segoe UI'; font-size:13px; }
 QMainWindow { background:#f4f6f9; }
@@ -257,7 +257,6 @@ QSplitter::handle:vertical:pressed { background:#2563eb; }
 #resourceSectionTitle { font-size:17px; font-weight:700; color:#0f172a; }
 #resourceMeta { color:#64748b; }
 #resourceGauge { background:#ffffff; }
-"""
 /* Shared file/terminal workspace controls */
 QToolButton#feNav { background:transparent; border:none; border-radius:6px; padding:3px; min-width:26px; min-height:26px; color:#475569; }
 QToolButton#feNav:hover { background:#e2e8f0; }
@@ -287,6 +286,8 @@ QSplitter#mainSplitter::handle:vertical:pressed { background:#2563eb; }
 
 
 
+
+"""
 
 def theme_stylesheet(name: str) -> str:
     """Return stylesheet for 'dark' or 'light'."""
