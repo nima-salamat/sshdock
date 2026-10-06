@@ -284,18 +284,21 @@ def build_top_script(sample_interval: float = 1.0,
     # We clamp to a minimum of 0.1s — anything lower is unreliable.
     interval_str = f"{max(0.1, float(sample_interval)):.1f}"
     return (
-        "top -b -n 2 -d {interval} "
-        # -w 200 keeps long command lines from being truncated.
-        "-w 200 2>/dev/null | "
-        # Take only the second iteration (the one with delta-based CPU%).
-        "awk '/^top -/{{n++}} n==2 && /^[ ]*[0-9]/ {{"
-        # top output columns (procps-ng default):
-        #   PID USER PR NI VIRT RES SHR S %CPU %MEM TIME+ COMMAND
-        "print $1\"\\t\"$2\"\\t\"$9\"\\t\"$10\"\\t\""
-        # RSS in MB: $6 is RES in KiB, convert to MiB
-        "($6/1024)\"\\t\"$8\"\\t\"$12"
-        "}}' | sort -t'\\t' -k3 -rn | head -n {max_procs}"
+        "set +e; "
+        "tmp=/tmp/.sshdock_top.$$; "
+        "LC_ALL=C COLUMNS=200 top -b -n 2 -d {interval} 2>/dev/null | "
+        "awk '/^top -/{{n++}} n==2 && /^[[:space:]]*[0-9]/ {{"
+        "print $1"\\t"$2"\\t"$9"\\t"$10"\\t"($6/1024)"\\t"$8"\\t"$12"
+        "}}' | sort -t'\\t' -k3 -rn | head -n {max_procs} > \"$tmp\"; "
+        "if [ -s \"$tmp\" ]; then cat \"$tmp\"; "
+        "else "
+        "ps -eo pid=,user=,%cpu=,%mem=,rss=,stat=,args= --sort=-%cpu 2>/dev/null | "
+        "head -n {max_procs}; "
+        "fi; "
+        "rm -f \"$tmp\" 2>/dev/null; "
+        "exit 0"
     ).format(interval=interval_str, max_procs=max_procs)
+
 
 
 # ----------------------------------------------------------------------
