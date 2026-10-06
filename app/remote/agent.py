@@ -1,0 +1,164 @@
+from __future__ import annotations
+import asyncio, json, shlex, struct, uuid
+from dataclasses import dataclass
+from pathlib import Path
+
+PROTOCOL=1
+MAX_FRAME=4*1024*1024
+
+@dataclass(slots=True)
+class AgentCommandResult:
+    stdout:str
+    stderr:str
+    exit_code:int
+
+class AgentProtocolError(RuntimeError): pass
+
+def encode_frame(value, max_size=MAX_FRAME):
+    raw=json.dumps(value,ensure_ascii=False,separators=(",",":")).encode()
+    if len(raw)>max_size: raise AgentProtocolError("agent frame too large")
+    return struct.pack("!I",len(raw))+raw
+
+def decode_frame(raw,max_size=MAX_FRAME):
+    if len(raw)>max_size: raise AgentProtocolError("agent frame too large")
+    value=json.loads(raw.decode())
+    if not isinstance(value,dict): raise AgentProtocolError("agent frame must be an object")
+    return value
+
+class RemoteAgentClient:
+    def __init__(self,ssh):
+        self.ssh=ssh
+        self.connection=None
+        self.listener=None
+        self.reader=None
+        self.writer=None
+        self.process=None
+        self.remote_path=None
+        self.remote_port=None
+        self.local_port=None
+        self._reader_task=None
+        self._write_lock=asyncio.Lock()
+        self._pending={}
+        self._seq=0
+        self._closed=True
+
+    @property
+    def connected(self):
+        return not self._closed and self.writer is not None and self.listener is not None and self.process is not None
+
+    async def start(self):
+        if self.connected: return
+        self._closed=False
+        self.connection=self.ssh.connection
+        if self.connection is None or self.connection.is_closed():
+            raise RuntimeError("SSH transport unavailable")
+        self.remote_path=f"/tmp/sshdock-agent-{uuid.uuid4().hex[:16]}.py"
+        await self._upload()
+        try:
+            cmd=("if command -v python3 >/dev/null 2>&1; then exec python3 "
+                 +shlex.quote(self.remote_path)+
+                 " --port 0; elif command -v python >/dev/null 2>&1; then exec python "
+                 +shlex.quote(self.remote_path)+
+                 " --port 0; else printf '%s\\\\n' 'SSHDock remote agent requires Python 3'; exit 127; fi")
+            self.process=await self.connection.create_process(cmd,encoding="utf-8",errors="replace")
+            line=await asyncio.wait_for(self.process.stdout.readline(),4)
+            if not line: raise RuntimeError("remote agent exited before handshake")
+            hello=json.loads(line)
+            if int(hello.get("protocol",0))!=PROTOCOL: raise RuntimeError("remote agent protocol mismatch")
+            self.remote_port=int(hello["port"])
+            if not (1<=self.remote_port<=65535): raise RuntimeError("remote agent returned invalid port")
+            self.token=str(hello["token"])
+            self.listener=await self.connection.forward_local_port("127.0.0.1",0,"127.0.0.1",self.remote_port)
+            self.local_port=int(self.listener.get_port())
+            self.reader,self.writer=await asyncio.wait_for(asyncio.open_connection("127.0.0.1",self.local_port),4)
+            self._reader_task=asyncio.create_task(self._reader_loop(),name="remote-agent-reader")
+            await self.request("hello",{"protocol":PROTOCOL,"token":self.token},timeout=4)
+        except Exception:
+            await self.close()
+            raise
+
+    async def _upload(self):
+        src=Path(__file__).with_name("server.py").read_text(encoding="utf-8")
+        p=await self.connection.create_process("cat > "+shlex.quote(self.remote_path),encoding="utf-8",errors="replace")
+        p.stdin.write(src)
+        p.stdin.write_eof()
+        await asyncio.wait_for(p.wait_closed(),5)
+        code=getattr(p,"exit_status",None)
+        if code not in (None,0): raise RuntimeError(f"remote agent upload failed: {code}")
+
+    async def request(self,method,params=None,timeout=15.0):
+        if self.writer is None: raise RuntimeError("remote agent not connected")
+        self._seq+=1
+        rid=str(self._seq)
+        fut=asyncio.get_running_loop().create_future()
+        self._pending[rid]=fut
+        async with self._write_lock:
+            self.writer.write(encode_frame({"id":rid,"method":method,"params":params or {}}))
+            await self.writer.drain()
+        try:
+            return await (asyncio.wait_for(fut,timeout) if timeout is not None else fut)
+        finally:
+            self._pending.pop(rid,None)
+
+    async def _reader_loop(self):
+        try:
+            while True:
+                h=await self.reader.readexactly(4)
+                n=struct.unpack("!I",h)[0]
+                if n<=0 or n>MAX_FRAME: raise AgentProtocolError("invalid frame size")
+                msg=decode_frame(await self.reader.readexactly(n))
+                fut=self._pending.get(str(msg.get("id","")))
+                if fut is None or fut.done(): continue
+                if msg.get("ok"): fut.set_result(msg.get("result"))
+                else:
+                    e=msg.get("error") or {}
+                    fut.set_exception(AgentProtocolError(str(e.get("message") or "remote agent request failed")))
+        except asyncio.CancelledError: pass
+        except Exception as exc:
+            for fut in tuple(self._pending.values()):
+                if not fut.done(): fut.set_exception(exc)
+
+    async def exec(self,command,timeout=None):
+        r=await self.request("exec",{"command":command,"timeout":timeout},timeout=(timeout or 15)+2)
+        if not isinstance(r,dict): raise AgentProtocolError("invalid exec result")
+        return AgentCommandResult(str(r.get("stdout") or ""),str(r.get("stderr") or ""),int(r.get("exit_code",0)))
+
+    async def close(self):
+        if self._closed: return
+        self._closed=True
+        try:
+            if self.writer is not None:
+                try: await asyncio.wait_for(self.request("shutdown",{}),2.0)
+                except Exception: pass
+        finally:
+            if self.writer is not None:
+                try: self.writer.close(); await asyncio.wait_for(self.writer.wait_closed(),.5)
+                except Exception: pass
+            self.writer=None; self.reader=None
+            if self._reader_task is not None:
+                t=self._reader_task; self._reader_task=None
+                if t is not asyncio.current_task():
+                    t.cancel()
+                    try: await asyncio.wait_for(t,.5)
+                    except (asyncio.CancelledError,asyncio.TimeoutError): pass
+            if self.listener is not None:
+                try: self.listener.close(); await asyncio.wait_for(self.listener.wait_closed(),.8)
+                except Exception: pass
+                self.listener=None
+            if self.process is not None:
+                try: self.process.terminate()
+                except Exception: pass
+                try: await asyncio.wait_for(self.process.wait_closed(),1.0)
+                except Exception: pass
+                self.process=None
+            if self.remote_path and self.connection is not None and not self.connection.is_closed():
+                try:
+                    await asyncio.wait_for(self.connection.run("rm -f "+shlex.quote(self.remote_path),check=False),2.0)
+                except Exception: pass
+            self._reject(RuntimeError("remote agent closed"))
+            self.remote_path=None; self.remote_port=None; self.local_port=None
+
+    def _reject(self,exc):
+        for fut in tuple(self._pending.values()):
+            if not fut.done(): fut.set_exception(exc)
+        self._pending.clear()
