@@ -227,7 +227,10 @@ def test_terminal_explorer_has_transfer_progress_delete_and_media_controls():
     assert "self.delete_btn = self._button(" in src
     assert "IMAGE_EXTS" in src
     assert "VIDEO_EXTS" in src
-    assert "def open_media(self, path, *, is_video):" in src
+    assert "AUDIO_EXTS" in src
+    assert 'qta.icon("fa5s.times", color=remove_color)' in src
+    assert "def open_media(self, path, *, is_video, is_audio=False):" in src
+    assert "Audio is still downloading" in src
     assert '"Source"' in src
     assert 'save_media_btn = QPushButton("Save As")' in src
     assert 'save_media_btn.setEnabled(False)' in src
@@ -280,3 +283,18 @@ def test_terminal_webchannel_report_cwd_accepts_js_string_argument():
     src = (ROOT / "app/terminal/web_widget.py").read_text(encoding="utf-8")
     assert "    @Slot(str)\n    def report_cwd(self, path: str) -> None:" in src
     assert "    @Slot()\n    def report_cwd(self, path: str) -> None:" not in src
+
+
+def test_terminal_explorer_audio_video_file_types_use_dedicated_icons():
+    src = (ROOT / "app/files/file_types.py").read_text(encoding="utf-8")
+    explorer = (ROOT / "app/files/terminal_explorer.py").read_text(encoding="utf-8")
+    assert 'FileType("video", "fa5s.file-video"' in src
+    assert 'FileType("audio", "fa5s.file-audio"' in src
+    assert '"video":' in src and '"audio":' in src
+    assert '".flac"' in src and '".opus"' in src
+    assert '".mkv"' in explorer and '".mp3"' in explorer
+
+
+def test_terminal_explorer_remove_action_uses_real_times_icon():
+    src = (ROOT / "app/files/terminal_explorer.py").read_text(encoding="utf-8")
+    assert 'qta.icon("fa5s.times", color=remove_color)' in src
