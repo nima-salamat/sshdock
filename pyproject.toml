@@ -1,0 +1,18 @@
+[build-system]
+requires=["setuptools>=70"]
+build-backend="setuptools.build_meta"
+[project]
+name="sshdock"
+version="0.2.0"
+description="Cross-platform SSH and Docker desktop administration client"
+requires-python=">=3.10"
+dependencies=["PySide6==6.11.2","asyncssh==2.24.0","bcrypt>=3.1.3,<6","qasync==0.28.0","keyring==25.7.0","platformdirs>=4.3,<5","pyte>=0.8.2,<1"]
+[project.scripts]
+sshdock="app.main:main"
+[tool.setuptools.packages.find]
+where=["."]
+include=["app*"]
+
+[tool.pytest.ini_options]
+testpaths=["tests"]
+pythonpath=["."]

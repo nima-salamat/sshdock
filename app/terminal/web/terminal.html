@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#080d13" />
+  <link rel="stylesheet" href="vendor/xterm.css" />
+  <style>
+    html, body {
+      margin: 0; padding: 0; height: 100%; width: 100%;
+      background: #080d13 !important; color: #e6edf3;
+      overflow: hidden; color-scheme: dark;
+    }
+    #term-root, #terminal {
+      height: 100%; width: 100%;
+      box-sizing: border-box;
+    }
+    #terminal { padding: 4px; position: relative; }
+    .xterm { height: 100%; }
+    .xterm-viewport { overflow-y: auto !important; }
+
+    /*
+     * Magic Docker table — plan:
+     *  1) Shell prints 20 blank lines then PS1.
+     *  2) We place one HTML block per table, height = 20 * cellHeight.
+     *  3) top = (startAbs - viewportY) * cellHeight  → moves with shell scroll.
+     *  4) .body { overflow:auto } → table has its own scrollbar.
+     *  5) Wheel on .body does not scroll the shell (stopPropagation) when table can scroll.
+     *  6) Right padding so table scrollbar sits clear of xterm viewport scrollbar.
+     *  7) Up to ~20 data rows fit without internal scrollbar when content is short.
+     *  8) Column headers are drag-resizable (col-resize cursor on right edge).
+     */
+    .sshdock-tbl {
+      position: absolute;
+      left: 0;
+      /* Leave room for the shell (xterm) scrollbar so table scrollbar never overlaps it */
+      right: 14px;
+      z-index: 25;
+      display: flex;
+      flex-direction: column;
+      box-sizing: border-box;
+      background: #0c1219;
+      border: 1px solid #2a3440;
+      border-radius: 3px;
+      overflow: hidden;
+      font-family: Cascadia Mono, Consolas, Menlo, monospace;
+      font-size: 12px;
+      color: #e6edf3;
+      pointer-events: auto;
+      /* Small visual gap from the shell edge / scrollbar */
+      margin-right: 2px;
+    }
+    .sshdock-tbl .cap {
+      flex: 0 0 auto;
+      padding: 2px 8px;
+      font-size: 11px;
+      color: #8b949e;
+      background: #0e141c;
+      border-bottom: 1px solid #1e2630;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .sshdock-tbl .body {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: auto;           /* own scrollbar */
+      overscroll-behavior: contain;
+      /* Inset so body scrollbar stays inside the block and clear of shell scrollbar */
+      scrollbar-gutter: stable;
+      scrollbar-width: thin;
+      scrollbar-color: #3d4a5c #0c1219;
+    }
+    .sshdock-tbl .body::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    .sshdock-tbl .body::-webkit-scrollbar-track {
+      background: #0c1219;
+    }
+    .sshdock-tbl .body::-webkit-scrollbar-thumb {
+      background: #3d4a5c;
+      border-radius: 4px;
+    }
+    .sshdock-tbl .body::-webkit-scrollbar-thumb:hover {
+      background: #526078;
+    }
+    .sshdock-tbl table {
+      border-collapse: separate;
+      border-spacing: 0;
+      width: max-content;
+      min-width: 100%;
+      table-layout: auto;
+    }
+    .sshdock-tbl thead th {
+      position: sticky;
+      top: 0;
+      background: #141b24;
+      color: #7cb7ff;
+      font-weight: 600;
+      text-align: left;
+      padding: 2px 8px;
+      border-bottom: 1px solid #2a3440;
+      border-right: 1px solid #1a222c;
+      white-space: nowrap;
+      min-width: 48px;
+      cursor: col-resize;
+      user-select: none;
+    }
+    .sshdock-tbl thead th:hover {
+      background: #1a2430;
+    }
+    .sshdock-tbl tbody td {
+      padding: 2px 8px;
+      border-bottom: 1px solid #121820;
+      border-right: 1px solid #121820;
+      white-space: nowrap;
+    }
+    .sshdock-tbl .col-id {
+      min-width: 52ch !important;
+      width: max-content !important;
+      max-width: none !important;
+    }
+    .sshdock-tbl tbody tr:nth-child(even) { background: rgba(18,24,32,0.65); }
+    .sshdock-tbl tbody tr:hover { background: #152032; }
+    .sshdock-tbl td.st-up { color: #3fb950; }
+    .sshdock-tbl td.st-down { color: #f85149; }
+    .sshdock-tbl td.st-warn { color: #d29922; }
+
+  </style>
+</head>
+<body>
+  <div id="term-root">
+    <div id="terminal"></div>
+  </div>
+
+<script src="vendor/xterm.js"></script>
+  <script src="vendor/xterm-addon-fit.js"></script>
+  <script src="vendor/qwebchannel.js"></script>
+  <script>
+    (function () {
+      function resolveTerminal() {
+        if (window.Terminal) return window.Terminal;
+        if (window.xterm && window.xterm.Terminal) return window.xterm.Terminal;
+        return null;
+      }
+      function resolveFitAddon() {
+        if (window.FitAddon && window.FitAddon.FitAddon) return window.FitAddon.FitAddon;
+        if (window.FitAddon) return window.FitAddon;
+        return null;
+      }
+
+      const TerminalCtor = resolveTerminal();
+      const FitCtor = resolveFitAddon();
+      if (!TerminalCtor) {
+        document.body.innerHTML = '<pre style="color:#f88;padding:12px">xterm.js failed to load</pre>';
+        return;
+      }
+
+      const term = new TerminalCtor({
+        cursorBlink: true,
+        fontFamily: 'Cascadia Mono, Consolas, Menlo, monospace',
+        fontSize: 13,
+        lineHeight: 1.2,
+        convertEol: true,
+        drawBoldTextInBrightColors: true,
+        minimumContrastRatio: 4,
+        theme: {
+          background: '#080d13',
+          foreground: '#e6edf3',
+          cursor: '#e6edf3',
+          selectionBackground: '#264f78',
+          black: '#0b0f14',
+          red: '#ff5f56',
+          green: '#5cff8a',
+          yellow: '#ffd866',
+          blue: '#5aa9ff',
+          magenta: '#d68cff',
+          cyan: '#52e8ff',
+          white: '#e6edf3',
+          brightBlack: '#66727e',
+          brightRed: '#ff6b6b',
+          brightGreen: '#69f58f',
+          brightYellow: '#ffe58a',
+          brightBlue: '#78b9ff',
+          brightMagenta: '#e7a8ff',
+          brightCyan: '#82f1ff',
+          brightWhite: '#ffffff'
+        },
+        allowProposedApi: true,
+        scrollback: 5000
+      });
+
+      const fitAddon = FitCtor ? new FitCtor() : null;
+      if (fitAddon) term.loadAddon(fitAddon);
+
+      term.open(document.getElementById('terminal'));
+
+      let bridge = null;
+      function reportCwdFromOsc(data) {
+        try {
+          let value = String(data || '');
+          // OSC 7 forms: file://host/path | file:///path | /path
+          if (value.indexOf('file://') === 0) {
+            value = value.slice('file://'.length);
+            const slash = value.indexOf('/');
+            value = slash >= 0 ? value.slice(slash) : '/';
+          }
+          try { value = decodeURIComponent(value); } catch (e) {}
+          if (!value || value.charAt(0) !== '/') value = '/' + (value || '');
+          value = value.replace(/\/{2,}/g, '/');
+          if (value.length > 1 && value.endsWith('/')) value = value.slice(0, -1);
+          window.sshdockReportCwd = value;
+          if (bridge && bridge.report_cwd) bridge.report_cwd(value);
+          return true; // always consume so sequence never prints as text
+        } catch (e) { return true; }
+      }
+      try {
+        if (term.parser && term.parser.registerOscHandler) term.parser.registerOscHandler(7, reportCwdFromOsc);
+        else if (term.registerOscHandler) term.registerOscHandler(7, reportCwdFromOsc);
+      } catch (e) {}
+      let lastCols = 0, lastRows = 0;
+      let fitTimer = null;
+      let lastFindQuery = '';
+      let lastFindRow = -1;
+
+      function reportSize() {
+        if (!fitAddon) return;
+        try { fitAddon.fit(); } catch (e) {}
+        const cols = term.cols, rows = term.rows;
+        if (cols === lastCols && rows === lastRows) return;
+        lastCols = cols; lastRows = rows;
+        if (bridge && bridge.report_size) {
+          bridge.report_size(cols, rows);
+        }
+      }
+
+      function scheduleFit() {
+        if (fitTimer) clearTimeout(fitTimer);
+        fitTimer = setTimeout(reportSize, 80);
+      }
+
+      window.addEventListener('resize', scheduleFit);
+      // Observe container size (splitter drags)
+      if (window.ResizeObserver) {
+        new ResizeObserver(scheduleFit).observe(document.getElementById('term-root') || document.getElementById('terminal'));
+      }
+
+      term.onData(function (data) {
+        if (bridge && bridge.send_input) bridge.send_input(data);
+      });
+
+      // API for Python
+      term.attachCustomKeyEventHandler(function (ev) {
+        if (ev.type === 'keydown' && ev.ctrlKey && ev.shiftKey && (ev.key === 'F' || ev.code === 'KeyF')) {
+          if (bridge && bridge.request_find) bridge.request_find();
+          return false;
+        }
+        return true;
+      });
+
+      window.sshdockTerm = {
+        write: function (data) { term.write(data); },
+        clear: function () { term.clear(); term.write('\x1b[H\x1b[2J'); },
+        focus: function () { term.focus(); },
+        showTable: function (payload) {
+          try {
+            /*
+             * Layout math (fixed):
+             *   Shell: command, then 20 newlines, then PS1.
+             *   Cursor is on PS1 when we run. Absolute line of PS1 = baseY+cursorY.
+             *   Table covers [promptAbs-20, promptAbs)  → 20 cells.
+             *   Pixel top in viewport = (startAbs - viewportY) * cellH
+             *   Pixel height           = 20 * cellH
+             * Shell scroll updates viewportY → we recompute top (term.onScroll).
+             * Table .body scrolls independently; wheel is stopped inside it when it can scroll.
+             * Block is inset from the right so its scrollbar never overlaps the shell scrollbar.
+             */
+            const data = (typeof payload === 'string') ? JSON.parse(payload) : payload;
+            const cols = data.columns || [];
+            const rows = data.rows || [];
+            const cmd = (data.command || '').trim();
+            const title = data.title || 'result';
+            const RESERVE = 20;
+
+            const buf = term.buffer.active;
+            const promptAbs = buf.baseY + buf.cursorY;
+            const startAbs = Math.max(0, promptAbs - RESERVE);
+
+            function esc(s) {
+              return String(s == null ? '' : s)
+                .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+            }
+            function statusClass(v) {
+              const low = String(v).toLowerCase();
+              if (/up |running|healthy|online/.test(low)) return 'st-up';
+              if (/exit|dead|unhealthy|stopped/.test(low)) return 'st-down';
+              if (/created|paused|restarting/.test(low)) return 'st-warn';
+              return '';
+            }
+            function isIdCol(n) {
+              const s = String(n||'').toLowerCase();
+              return s === 'id' || s === 'image id' || s.endsWith(' id');
+            }
+
+            // Host = xterm element so coordinates match the glyph grid
+            const host = term.element || document.getElementById('terminal');
+            if (!host) return;
+            if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+
+            if (!window._sshdockTbls) window._sshdockTbls = [];
+
+            const block = document.createElement('div');
+            block.className = 'sshdock-tbl';
+            block._startAbs = startAbs;
+            block._cells = RESERVE;
+
+            let html = '<div class="cap">' + esc(cmd ? ('$ '+cmd) : ('$ '+title)) +
+              ' · ' + esc(title) + ' · ' + rows.length + ' rows</div><div class="body"><table><thead><tr>';
+            cols.forEach(function(c) {
+              html += '<th'+(isIdCol(c)?' class="col-id"':'')+'>'+esc(c)+'</th>';
+            });
+            html += '</tr></thead><tbody>';
+            const statusIdx = cols.findIndex(function(c){
+              const s=String(c).toLowerCase(); return s==='status'||s==='state';
+            });
+            rows.forEach(function(row){
+              html += '<tr>';
+              (row||[]).forEach(function(cell,i){
+                const val = cell==null?'':String(cell);
+                const cl = [];
+                if (i===statusIdx){ const s=statusClass(val); if(s) cl.push(s); }
+                if (isIdCol(cols[i])) cl.push('col-id');
+                html += '<td'+(cl.length?' class="'+cl.join(' ')+'"':'')+
+                  ' title="'+esc(val)+'">'+esc(val)+'</td>';
+              });
+              html += '</tr>';
+            });
+            html += '</tbody></table></div>';
+            block.innerHTML = html;
+            host.appendChild(block);
+            window._sshdockTbls.push(block);
+
+            // ID column full width + drag-resize headers (all columns)
+            const table = block.querySelector('table');
+            if (table) {
+              table.querySelectorAll('thead th').forEach(function(th, colIdx){
+                if (th.classList.contains('col-id')) {
+                  let maxLen = (th.textContent||'').length;
+                  table.querySelectorAll('tbody tr').forEach(function(tr){
+                    const td=tr.children[colIdx];
+                    if (td) maxLen=Math.max(maxLen,(td.textContent||'').length);
+                  });
+                  const w = Math.max(200, maxLen*8.5+28);
+                  th.style.width = th.style.minWidth = w+'px';
+                  table.querySelectorAll('tbody tr').forEach(function(tr){
+                    const td=tr.children[colIdx];
+                    if (td) td.style.width = td.style.minWidth = w+'px';
+                  });
+                }
+                // Drag to resize any column from the right edge of the header
+                th.addEventListener('mousedown', function(ev){
+                  const rect=th.getBoundingClientRect();
+                  if (rect.right-ev.clientX>10) return; // only near right edge
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  const x0=ev.clientX, w0=th.offsetWidth;
+                  function move(e){
+                    const w=Math.max(48,w0+(e.clientX-x0));
+                    th.style.width=th.style.minWidth=w+'px';
+                    table.querySelectorAll('tbody tr').forEach(function(tr){
+                      const td=tr.children[colIdx];
+                      if(td) td.style.width=td.style.minWidth=w+'px';
+                    });
+                  }
+                  function up(){
+                    document.removeEventListener('mousemove',move);
+                    document.removeEventListener('mouseup',up);
+                  }
+                  document.addEventListener('mousemove',move);
+                  document.addEventListener('mouseup',up);
+                });
+              });
+              const bodyEl = block.querySelector('.body');
+              if (bodyEl) {
+                // Table scroll stays on the table; shell keeps its own scrollbar.
+                // Only stopPropagation when the table body can still scroll in that direction.
+                bodyEl.addEventListener('wheel', function(ev){
+                  const el=bodyEl;
+                  const atTop = el.scrollTop <= 0 && ev.deltaY < 0;
+                  const atBot = el.scrollTop + el.clientHeight >= el.scrollHeight - 1 && ev.deltaY > 0;
+                  if (!atTop && !atBot) {
+                    ev.stopPropagation();
+                  }
+                }, {passive:true});
+              }
+            }
+
+            function cellH(){
+              try {
+                const d=term._core&&term._core._renderService&&term._core._renderService.dimensions;
+                if (d&&d.css&&d.css.cell&&d.css.cell.height) return d.css.cell.height;
+              } catch(e){}
+              return (host.clientHeight||400)/Math.max(term.rows,1);
+            }
+
+            function sync(){
+              const list=window._sshdockTbls||[];
+              const viewportY=term.buffer.active.viewportY;
+              const ch=cellH();
+              const viewH=host.clientHeight||0;
+              for (let i=0;i<list.length;i++){
+                const b=list[i];
+                if (!b||!b.parentNode) continue;
+                const start=b._startAbs|0;
+                const cells=b._cells|RESERVE;
+                const top=(start-viewportY)*ch;
+                const height=cells*ch;
+                b.style.top=top+'px';
+                b.style.height=height+'px';
+                b.style.left='0px';
+                // width controlled by CSS (right: 14px) so we do not force 100%
+                // Only visible while its reserved lines intersect the viewport
+                b.style.display = (top+height>0 && top<viewH) ? 'flex' : 'none';
+              }
+            }
+
+            window._sshdockSync = sync;
+            if (!term._sshdockScrollHook) {
+              term._sshdockScrollHook = true;
+              try { term.onScroll(function(){ sync(); }); } catch(e){}
+              // Also sync when xterm re-renders / fits
+              try {
+                if (term.onRender) term.onRender(function(){ sync(); });
+              } catch(e){}
+              window.addEventListener('resize', function(){ sync(); });
+              if (window.ResizeObserver) {
+                try { new ResizeObserver(function(){ sync(); }).observe(host); } catch(e){}
+              }
+            }
+            sync();
+            requestAnimationFrame(sync);
+            setTimeout(sync, 40);
+            setTimeout(sync, 150);
+            try { term.focus(); } catch(e){}
+          } catch (e) {
+            console.error('showTable', e);
+          }
+        },
+        hideTable: function () {
+          const block = document.getElementById('sshdock-result-block');
+          if (block) {
+            block.classList.remove('visible');
+            block.style.visibility = 'hidden';
+          }
+        },
+
+
+        find: function (query, options) {
+          try {
+            if (!term || !query) return false;
+            const q = String(query);
+            const buffer = term.buffer.active;
+            const start = q === lastFindQuery ? lastFindRow + 1 : 0;
+            const total = buffer.length;
+            for (let pass = 0; pass < 2; pass++) {
+              const begin = pass === 0 ? start : 0;
+              const end = pass === 0 ? total : Math.min(start, total);
+              for (let row = begin; row < end; row++) {
+                const line = buffer.getLine(row);
+                if (!line) continue;
+                const text = line.translateToString(true);
+                const col = text.toLowerCase().indexOf(q.toLowerCase());
+                if (col >= 0) {
+                  lastFindQuery = q;
+                  lastFindRow = row;
+                  term.scrollToLine(row);
+                  if (term.select) term.select(col, row, Math.max(1, q.length));
+                  term.focus();
+                  return true;
+                }
+              }
+            }
+            return false;
+          } catch (e) { return false; }
+        }
+      };
+
+      function bindBridge() {
+        if (typeof qt === 'undefined' || !qt.webChannelTransport) {
+          // Standalone / fallback
+          window.sshdockTerm.ready = true;
+          scheduleFit();
+          return;
+        }
+        new QWebChannel(qt.webChannelTransport, function (channel) {
+          bridge = channel.objects.bridge;
+          window.sshdockTerm.ready = true;
+          scheduleFit();
+          if (bridge && bridge.js_ready) bridge.js_ready();
+          // Flush any cwd reported before the bridge was ready
+          if (bridge && bridge.report_cwd && window.sshdockReportCwd) {
+            try { bridge.report_cwd(window.sshdockReportCwd); } catch (e) {}
+          }
+        });
+      }
+// Qt injects qt.webChannelTransport after page load
+      if (document.readyState === 'complete') bindBridge();
+      else window.addEventListener('load', bindBridge);
+      setTimeout(bindBridge, 50);
+    })();
+  </script>
+</body>
+</html>
