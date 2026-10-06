@@ -73,7 +73,7 @@ def test_connect_kwargs_uses_explicit_auth_material() -> None:
     assert kwargs["client_keys"]
     assert kwargs["connect_timeout"] == 7
     assert kwargs["keepalive_interval"] == 11
-    assert kwargs["server_alive_count_max"] == 3
+    assert kwargs["keepalive_count_max"] == 3
     assert kwargs["config"] is None
 
 
