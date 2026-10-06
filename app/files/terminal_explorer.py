@@ -36,6 +36,10 @@ except Exception:
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".ico"}
 VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".mpeg", ".mpg", ".ts", ".3gp"}
+AUDIO_EXTS = {
+    ".mp3", ".wav", ".flac", ".aac", ".m4a", ".ogg", ".oga", ".opus",
+    ".wma", ".aiff", ".aif", ".alac", ".amr", ".ac3", ".mka", ".mid", ".midi",
+}
 
 
 def _queue_icon(name: str, is_dir: bool = False) -> QIcon:
@@ -82,7 +86,14 @@ class _QueueRowWidget(QWidget):
         remove_btn.setAutoRaise(True)
         remove_btn.setFixedSize(24, 24)
         remove_btn.setToolTip("Remove from list")
-        remove_btn.setIcon(_queue_icon("fa5s.times"))
+        app = QApplication.instance()
+        theme = str(app.property("sshdockTheme") if app is not None else "dark").lower()
+        remove_color = "#64748b" if theme == "light" else "#aebccc"
+        try:
+            import qtawesome as qta
+            remove_btn.setIcon(qta.icon("fa5s.times", color=remove_color))
+        except Exception:
+            pass
         remove_btn.setIconSize(QSize(12, 12))
         remove_btn.clicked.connect(self.removed.emit)
         layout.addWidget(remove_btn)
@@ -311,7 +322,7 @@ class _EditorWorkspace(QWidget):
         self.raise_()
         view.setFocus(Qt.FocusReason.OtherFocusReason)
 
-    def open_media(self, path, *, is_video):
+    def open_media(self, path, *, is_video, is_audio=False):
         if path in self._tabs:
             idx = self.tabs.indexOf(self._tabs[path]["widget"])
             if idx >= 0:
@@ -352,11 +363,20 @@ class _EditorWorkspace(QWidget):
         preview_lay.addWidget(preview_status)
 
         player = None
+        audio_output = None
         video_widget = None
         image_label = None
-        if is_video and HAS_MEDIA:
-            video_widget = QVideoWidget()
-            preview_lay.addWidget(video_widget, 1)
+        media_title = None
+        if (is_video or is_audio) and HAS_MEDIA:
+            if is_video:
+                video_widget = QVideoWidget()
+                preview_lay.addWidget(video_widget, 1)
+            else:
+                media_title = QLabel("Audio preview")
+                media_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                media_title.setObjectName("mediaPreviewTitle")
+                preview_lay.addWidget(media_title, 1)
+
             controls = QHBoxLayout()
             play_btn = QPushButton("Play / Pause")
             stop_btn = QPushButton("Stop")
@@ -364,27 +384,49 @@ class _EditorWorkspace(QWidget):
             controls.addWidget(stop_btn)
             controls.addStretch()
             preview_lay.addLayout(controls)
+
             player = QMediaPlayer()
-            audio = QAudioOutput()
-            audio.setVolume(1.0)
-            player.setAudioOutput(audio)
-            player.setVideoOutput(video_widget)
+            audio_output = QAudioOutput()
+            audio_output.setVolume(1.0)
+            player.setAudioOutput(audio_output)
+            if video_widget is not None:
+                player.setVideoOutput(video_widget)
+
             play_btn.clicked.connect(
                 lambda: player.pause()
                 if player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
                 else player.play()
             )
             stop_btn.clicked.connect(player.stop)
-            def _video_error(*_):
-                preview_status.setText("Video is still downloading; playback will retry as data arrives.")
+
+            def _media_error(*_):
+                if is_video:
+                    preview_status.setText(
+                        "Video is still downloading; playback will retry as data arrives."
+                    )
+                else:
+                    preview_status.setText(
+                        "Audio is still downloading; playback will retry as data arrives."
+                    )
                 try:
                     if QUrl is not None:
                         player.setSource(QUrl())
                 except Exception:
                     pass
-            player.errorOccurred.connect(_video_error)
+
+            player.errorOccurred.connect(_media_error)
         elif is_video:
-            note = QLabel("Qt Multimedia is unavailable, but the file can still be downloaded and opened as source.")
+            note = QLabel(
+                "Qt Multimedia is unavailable, but the file can still be downloaded "
+                "and opened as source."
+            )
+            note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            preview_lay.addWidget(note, 1)
+        elif is_audio:
+            note = QLabel(
+                "Qt Multimedia is unavailable, but the audio file can still be "
+                "downloaded and opened as source."
+            )
             note.setAlignment(Qt.AlignmentFlag.AlignCenter)
             preview_lay.addWidget(note, 1)
         else:
@@ -413,7 +455,8 @@ class _EditorWorkspace(QWidget):
         record = {
             "widget": page, "view": source_view, "status": transfer_status,
             "task": None, "source_task": None, "cleanup": None, "player": player,
-            "temp": None, "stop": None, "save_as": save_media_btn,
+            "audio_output": audio_output, "temp": None, "stop": None,
+            "save_as": save_media_btn,
         }
         self._tabs[path] = record
 
@@ -440,7 +483,7 @@ class _EditorWorkspace(QWidget):
                 transfer_status.setText(text)
                 preview_status.setText(text)
                 if player is not None:
-                    _try_video()
+                    _try_media()
                 if image_label is not None and os.path.exists(temp_path):
                     try:
                         pixmap = QPixmap(temp_path)
@@ -455,16 +498,13 @@ class _EditorWorkspace(QWidget):
                     except Exception:
                         pass
 
-            def _try_video():
+            def _try_media():
                 if player is None or QUrl is None or not os.path.exists(temp_path):
                     return
                 try:
                     size = os.path.getsize(temp_path)
                 except OSError:
                     return
-                # Try progressive playback once the container has a useful amount
-                # of data. Some formats require the final index and will simply
-                # stay paused until the download completes.
                 if size < 64 * 1024:
                     return
                 try:
@@ -472,14 +512,17 @@ class _EditorWorkspace(QWidget):
                         player.setSource(QUrl.fromLocalFile(temp_path))
                     if player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
                         player.play()
-                        preview_status.setText("Playing while downloading…")
+                        preview_status.setText(
+                            "Playing while downloading…"
+                            if is_video else "Playing audio while downloading…"
+                        )
                 except Exception:
                     pass
 
             try:
                 await self.backend.download(path, temp_path, progress_handler=progress)
                 if player is not None:
-                    _try_video()
+                    _try_media()
                 if image_label is not None and os.path.exists(temp_path):
                     try:
                         pixmap = QPixmap(temp_path)
@@ -1452,10 +1495,14 @@ class TerminalFileExplorer(QWidget):
         self.status.setText(f"Opening {ent.name}…")
         try:
             ext = posixpath.splitext(ent.name.lower())[1]
-            if ext in IMAGE_EXTS or ext in VIDEO_EXTS:
+            if ext in IMAGE_EXTS or ext in VIDEO_EXTS or ext in AUDIO_EXTS:
                 if self._editor is None:
                     self._editor = _EditorWorkspace(self.backend, parent=None)
-                self._editor.open_media(ent.path, is_video=ext in VIDEO_EXTS)
+                self._editor.open_media(
+                    ent.path,
+                    is_video=ext in VIDEO_EXTS,
+                    is_audio=ext in AUDIO_EXTS,
+                )
                 self.status.setText(f"Opened {ent.name} in media preview")
                 return
 
