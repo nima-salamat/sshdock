@@ -627,9 +627,10 @@ class SSHServerConnection:
             return data if isinstance(data, str) else data.decode("utf-8", "replace")
 
         async def _gather():
-            out_t = asyncio.create_task(_read_stream(getattr(proc, "stdout", None)))
-            err_t = asyncio.create_task(_read_stream(getattr(proc, "stderr", None)))
-            stdout_s, stderr_s = await asyncio.gather(out_t, err_t)
+            stdout_s, stderr_s = await asyncio.gather(
+                _read_stream(getattr(proc, "stdout", None)),
+                _read_stream(getattr(proc, "stderr", None)),
+            )
             try:
                 await proc.wait()
             except Exception:

@@ -106,8 +106,9 @@ def test_resource_usage_uses_batch_inspect():
     # The new pattern is a single `docker volume inspect ... $(docker volume ls -q)`.
     assert "for v in $(docker volume ls" not in DOCKER_MANAGER_SRC
     assert "for n in $(docker network ls" not in DOCKER_MANAGER_SRC
-    # New batch pattern:
-    assert "docker volume inspect --format" in DOCKER_MANAGER_SRC
+    # New batch pattern uses xargs so one inspect command handles all IDs.
+    assert "| xargs -r docker volume inspect" in DOCKER_MANAGER_SRC
+    assert "--format" in DOCKER_MANAGER_SRC
     assert "$(docker volume ls -q" in DOCKER_MANAGER_SRC
     assert "$(docker network ls -q" in DOCKER_MANAGER_SRC
 
