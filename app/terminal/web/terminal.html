@@ -16,9 +16,53 @@
       height: 100%; width: 100%;
       box-sizing: border-box;
     }
-    #terminal { padding: 4px; position: relative; }
+    #terminal {
+      padding: 4px 16px 4px 4px;
+      position: relative;
+      box-sizing: border-box;
+    }
     .xterm { height: 100%; }
-    .xterm-viewport { overflow-y: auto !important; }
+    .xterm .xterm-viewport {
+      overflow-y: scroll !important;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+    .xterm .xterm-viewport::-webkit-scrollbar {
+      width: 0;
+      height: 0;
+    }
+
+    /* Dedicated terminal scroll gutter. xterm's canvas never occupies this area. */
+    #sshdock-scrollbar {
+      position: absolute;
+      top: 4px;
+      right: 2px;
+      bottom: 4px;
+      width: 11px;
+      border-radius: 6px;
+      background: rgba(80, 94, 112, 0.18);
+      z-index: 80;
+      user-select: none;
+      touch-action: none;
+    }
+    #sshdock-scrollbar[hidden] { display: none; }
+    #sshdock-scrollbar-thumb {
+      position: absolute;
+      top: 0;
+      left: 1px;
+      width: 9px;
+      min-height: 28px;
+      border-radius: 5px;
+      background: rgba(139, 154, 173, 0.62);
+      cursor: grab;
+    }
+    #sshdock-scrollbar-thumb:hover {
+      background: rgba(168, 183, 201, 0.8);
+    }
+    #sshdock-scrollbar-thumb.dragging {
+      cursor: grabbing;
+      background: rgba(185, 201, 220, 0.9);
+    }
 
     /*
      * Magic Docker table — plan:
@@ -34,8 +78,7 @@
     .sshdock-tbl {
       position: absolute;
       left: 0;
-      /* Leave room for the shell (xterm) scrollbar so table scrollbar never overlaps it */
-      right: 14px;
+      right: 0;
       z-index: 25;
       display: flex;
       flex-direction: column;
@@ -48,8 +91,7 @@
       font-size: 12px;
       color: #e6edf3;
       pointer-events: auto;
-      /* Small visual gap from the shell edge / scrollbar */
-      margin-right: 2px;
+      margin-right: 0;
     }
     .sshdock-tbl .cap {
       flex: 0 0 auto;
@@ -133,6 +175,9 @@
 <body>
   <div id="term-root">
     <div id="terminal"></div>
+    <div id="sshdock-scrollbar" hidden aria-label="Terminal scroll bar">
+      <div id="sshdock-scrollbar-thumb"></div>
+    </div>
   </div>
 
 <script src="vendor/xterm.js"></script>
@@ -197,6 +242,103 @@
 
       term.open(document.getElementById('terminal'));
 
+      /*
+       * Keep the terminal scrollbar in a real, dedicated gutter outside the
+       * xterm canvas. The xterm viewport remains the actual scroll container;
+       * we only hide its native scrollbar and mirror its position here.
+       */
+      const scrollRail = document.getElementById('sshdock-scrollbar');
+      const scrollThumb = document.getElementById('sshdock-scrollbar-thumb');
+      let scrollViewport = null;
+      let scrollDrag = null;
+
+      function getScrollViewport() {
+        if (scrollViewport && scrollViewport.isConnected) return scrollViewport;
+        scrollViewport = document.querySelector('#terminal .xterm-viewport');
+        return scrollViewport;
+      }
+
+      function syncScrollBar() {
+        const vp = getScrollViewport();
+        if (!scrollRail || !scrollThumb || !vp) return;
+        const trackH = scrollRail.clientHeight;
+        const clientH = vp.clientHeight;
+        const scrollH = vp.scrollHeight;
+        if (trackH <= 0 || clientH <= 0 || scrollH <= clientH + 1) {
+          scrollRail.hidden = true;
+          return;
+        }
+        scrollRail.hidden = false;
+        const maxScroll = Math.max(1, scrollH - clientH);
+        const thumbH = Math.max(28, Math.round(trackH * clientH / scrollH));
+        const travel = Math.max(0, trackH - thumbH);
+        const top = Math.round((vp.scrollTop / maxScroll) * travel);
+        scrollThumb.style.height = thumbH + 'px';
+        scrollThumb.style.transform = 'translateY(' + top + 'px)';
+      }
+
+      function scrollViewportToRatio(ratio) {
+        const vp = getScrollViewport();
+        if (!vp) return;
+        const maxScroll = Math.max(0, vp.scrollHeight - vp.clientHeight);
+        vp.scrollTop = Math.max(0, Math.min(1, ratio)) * maxScroll;
+        syncScrollBar();
+      }
+
+      function beginScrollDrag(ev) {
+        const vp = getScrollViewport();
+        if (!vp) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        const railRect = scrollRail.getBoundingClientRect();
+        const thumbH = scrollThumb.offsetHeight;
+        const maxTop = Math.max(1, railRect.height - thumbH);
+        const thumbTop = scrollThumb.getBoundingClientRect().top - railRect.top;
+        scrollDrag = {
+          startY: ev.clientY,
+          startTop: thumbTop,
+          maxTop: maxTop,
+          maxScroll: Math.max(0, vp.scrollHeight - vp.clientHeight),
+        };
+        scrollThumb.classList.add('dragging');
+      }
+
+      function moveScrollDrag(ev) {
+        if (!scrollDrag) return;
+        const delta = ev.clientY - scrollDrag.startY;
+        const top = Math.max(0, Math.min(scrollDrag.maxTop, scrollDrag.startTop + delta));
+        const vp = getScrollViewport();
+        if (vp) {
+          vp.scrollTop = (top / scrollDrag.maxTop) * scrollDrag.maxScroll;
+          syncScrollBar();
+        }
+      }
+
+      function endScrollDrag() {
+        if (!scrollDrag) return;
+        scrollDrag = null;
+        scrollThumb.classList.remove('dragging');
+      }
+
+      if (scrollRail && scrollThumb) {
+        scrollThumb.addEventListener('mousedown', beginScrollDrag);
+        document.addEventListener('mousemove', moveScrollDrag);
+        document.addEventListener('mouseup', endScrollDrag);
+        scrollRail.addEventListener('mousedown', function (ev) {
+          if (ev.target === scrollThumb) return;
+          const rect = scrollRail.getBoundingClientRect();
+          scrollViewportToRatio((ev.clientY - rect.top) / Math.max(1, rect.height));
+        });
+        scrollRail.addEventListener('wheel', function (ev) {
+          const vp = getScrollViewport();
+          if (!vp) return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          vp.scrollTop += ev.deltaY;
+          syncScrollBar();
+        }, {passive: false});
+      }
+
       let bridge = null;
       function reportCwdFromOsc(data) {
         try {
@@ -228,6 +370,7 @@
       function reportSize() {
         if (!fitAddon) return;
         try { fitAddon.fit(); } catch (e) {}
+        syncScrollBar();
         const cols = term.cols, rows = term.rows;
         if (cols === lastCols && rows === lastRows) return;
         lastCols = cols; lastRows = rows;
@@ -238,7 +381,14 @@
 
       function scheduleFit() {
         if (fitTimer) clearTimeout(fitTimer);
-        fitTimer = setTimeout(reportSize, 80);
+        fitTimer = setTimeout(function () {
+          reportSize();
+          try { if (window._sshdockSync) window._sshdockSync(); } catch (e) {}
+          requestAnimationFrame(function () {
+            syncScrollBar();
+            try { if (window._sshdockSync) window._sshdockSync(); } catch (e) {}
+          });
+        }, 80);
       }
 
       window.addEventListener('resize', scheduleFit);
@@ -286,7 +436,16 @@
 
             const buf = term.buffer.active;
             const promptAbs = buf.baseY + buf.cursorY;
-            const startAbs = Math.max(0, promptAbs - RESERVE);
+            let anchorMarker = null;
+            try {
+              // xterm markers follow buffer reflow, so the table stays attached
+              // to the same prompt even when window width changes.
+              anchorMarker = term.registerMarker(0);
+            } catch (e) {}
+            const startAbs = Math.max(
+              0,
+              anchorMarker && anchorMarker.line >= 0 ? anchorMarker.line - RESERVE : promptAbs - RESERVE
+            );
 
             function esc(s) {
               return String(s == null ? '' : s)
@@ -316,6 +475,7 @@
             block.className = 'sshdock-tbl';
             block._startAbs = startAbs;
             block._cells = RESERVE;
+            block._anchorMarker = anchorMarker;
 
             let html = '<div class="cap">' + esc(cmd ? ('$ '+cmd) : ('$ '+title)) +
               ' · ' + esc(title) + ' · ' + rows.length + ' rows</div><div class="body"><table><thead><tr>';
@@ -423,7 +583,13 @@
                   b.style.display = 'none';
                   continue;
                 }
-                const start=b._startAbs|0;
+                const markerLine = b._anchorMarker ? b._anchorMarker.line : -1;
+                if (b._anchorMarker && markerLine < 0) {
+                  b.style.display = 'none';
+                  continue;
+                }
+                const start = markerLine >= 0 ? Math.max(0, markerLine - (b._cells|RESERVE)) : (b._startAbs|0);
+                b._startAbs = start;
                 const cells=b._cells|RESERVE;
                 const top=(start-viewportY)*ch;
                 const height=cells*ch;
@@ -439,7 +605,12 @@
             window._sshdockSync = sync;
             if (!term._sshdockScrollHook) {
               term._sshdockScrollHook = true;
-              try { term.onScroll(function(){ sync(); }); } catch(e){}
+              try {
+                term.onScroll(function(){
+                  sync();
+                  syncScrollBar();
+                });
+              } catch(e){}
               // xterm.js exposes normal/alternate buffer transitions directly.
               // This is the reliable generic signal for full-screen terminal apps.
               try {
@@ -477,6 +648,7 @@
               requestAnimationFrame(window._sshdockSync);
             }
           } catch (e) {}
+          syncScrollBar();
           reportSize();
         },
 
