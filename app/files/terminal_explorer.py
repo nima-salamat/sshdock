@@ -423,7 +423,7 @@ class _EditorWorkspace(QWidget):
             try:
                 await self.backend.download(path, temp_path, progress_handler=progress)
                 if player is not None:
-                    await _try_video()
+                    _try_video()
                 if image_label is not None and os.path.exists(temp_path):
                     try:
                         pixmap = QPixmap(temp_path)
@@ -467,7 +467,7 @@ class _EditorWorkspace(QWidget):
                     pass
                 stop_download.clicked.connect(lambda: self._cleanup_record(path))
             finally:
-                record["stop"] = None
+                pass
 
         async def _source_loader():
             source_status.setText("Loading source…")
@@ -516,7 +516,13 @@ class _EditorWorkspace(QWidget):
         except Exception:
             record["task"] = None
 
-        stop_download.clicked.connect(record["stop"])
+        def _stop_download():
+            current = record.get("task")
+            if current is not None and not current.done():
+                current.cancel()
+
+        record["stop"] = _stop_download
+        stop_download.clicked.connect(_stop_download)
         return record["task"]
 
     def _load_media_source(self, path, view, status):
