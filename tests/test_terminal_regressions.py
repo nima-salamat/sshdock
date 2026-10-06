@@ -82,6 +82,28 @@ def test_terminal_bootstrap_disables_echo_before_payload():
     assert "manage_echo: bool = True" in docker
     assert 'return command' in docker
 
+def test_terminal_magic_has_python_and_browser_delivery_paths():
+    session = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
+    widget = (ROOT / "app/terminal/web_widget.py").read_text(encoding="utf-8")
+    html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    window = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
+    assert "_OSC_MAGIC_RE = re.compile" in session
+    assert "magic_command = Signal(str)" in widget
+    assert "def report_magic(self, payload: str)" in widget
+    assert "def _on_magic_command(self, payload: str)" in widget
+    assert "registerOscHandler(777, reportMagicFromOsc)" in html
+    assert "bridge.report_magic(payload)" in html
+    assert 'name="mdocker-xterm"' in window
+
+
+def test_mdocker_bootstrap_install_is_not_skipped_after_setup_failure():
+    src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
+    setup_pos = src.index('self.channel.write((setup + "\\r").encode("utf-8"))')
+    payload_pos = src.index("install_command(manage_echo=not echo_disabled)")
+    assert setup_pos < payload_pos
+    assert src[setup_pos:payload_pos].count("except Exception") >= 1
+
+
 def test_terminal_close_has_no_obsolete_bootstrap_cleanup_path():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     assert "_cleanup_bootstrap" not in src
