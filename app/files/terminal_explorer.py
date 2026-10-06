@@ -215,6 +215,7 @@ class TerminalFileExplorer(QWidget):
         self.search = QLineEdit()
         self.search.setObjectName("terminalExplorerSearch")
         self.search.setPlaceholderText("Search files by name, path or type…")
+        self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self._filter)
         self.search.setVisible(False)
         root.addWidget(self.search)
