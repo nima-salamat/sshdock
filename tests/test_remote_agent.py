@@ -67,6 +67,6 @@ def test_terminal_bootstrap_does_not_write_setup_commands_to_pty():
 def test_terminal_bootstrap_uses_non_pty_exec_and_controlled_bash_rc():
     from pathlib import Path
     text = Path("app/terminal/session.py").read_text(encoding="utf-8")
-    assert "self.ssh.start_command("cat > " + shlex.quote(path))" in text
+    assert 'self.ssh.start_command("cat > " + shlex.quote(path))' in text
     assert "--noprofile --rcfile" in text
     assert "DOCKER_PRETTY_SH" in text
