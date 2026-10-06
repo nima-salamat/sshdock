@@ -27,6 +27,19 @@ def test_terminal_explorer_restores_button_factory():
     assert "def _button(self, icon_name: str, tooltip: str, callback):" in src
     assert "self.search_btn = self._button(" in src
 
+def test_terminal_panel_toggles_show_active_state():
+    src = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
+    styles = (ROOT / "app/ui/styles.py").read_text(encoding="utf-8")
+    assert 'files_btn.setObjectName("terminalPanelToggle")' in src
+    assert 'sessions_btn.setObjectName("terminalPanelToggle")' in src
+    assert "files_btn.setCheckable(True)" in src
+    assert "sessions_btn.setCheckable(True)" in src
+    assert "files_btn.setChecked(False)" in src
+    assert "sessions_btn.setChecked(True)" in src
+    assert "self.terminal_files_toggle.setChecked(visible)" in src
+    assert "btn.setChecked(visible)" in src
+    assert "QPushButton#terminalPanelToggle:checked" in styles
+
 
 def test_terminal_webengine_fit_api_is_real_and_syncs_overlay():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
