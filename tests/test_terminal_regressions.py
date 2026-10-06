@@ -68,6 +68,16 @@ def test_virtual_tables_follow_xterm_alternate_screen():
     assert "term.buffer.onBufferChange" in src
 
 
+def test_terminal_bootstrap_disables_echo_before_payload():
+    src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
+    docker = (ROOT / "app/terminal/docker_pretty.py").read_text(encoding="utf-8")
+    assert 'self.channel.write(b"stty -echo 2>/dev/null\\r")' in src
+    assert 'self.channel.write(b"printf \'\\r\\033[K\'\\r")' in src
+    assert 'self.channel.write((setup + "\\r").encode("utf-8"))' in src
+    assert 'install_command(manage_echo=False) + "\\r"' in src
+    assert "manage_echo: bool = True" in docker
+    assert 'return command' in docker
+
 def test_terminal_close_has_no_obsolete_bootstrap_cleanup_path():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     assert "_cleanup_bootstrap" not in src
