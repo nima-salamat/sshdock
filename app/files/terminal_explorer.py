@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import posixpath
 from typing import Callable
 
@@ -7,6 +8,7 @@ from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QAbstractItemView, QHBoxLayout, QLabel, QLineEdit, QMenu, QPlainTextEdit,
+    QFileDialog,
     QPushButton, QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
@@ -201,9 +203,13 @@ class TerminalFileExplorer(QWidget):
         header.addStretch()
         self.up_btn = self._button("fa5s.level-up-alt", "Parent directory", self.go_up)
         self.refresh_btn = self._button("fa5s.sync-alt", "Refresh", self.refresh)
+        self.upload_btn = self._button("fa5s.upload", "Upload files here", self.upload_files)
+        self.download_btn = self._button("fa5s.download", "Download selected files", self.download_selected)
         self.close_btn = self._button("fa5s.times", "Close explorer", self.closed_requested.emit)
         header.addWidget(self.up_btn)
         header.addWidget(self.refresh_btn)
+        header.addWidget(self.upload_btn)
+        header.addWidget(self.download_btn)
         header.addWidget(self.close_btn)
         root.addLayout(header)
 
@@ -214,6 +220,7 @@ class TerminalFileExplorer(QWidget):
         root.addWidget(self.path_edit)
 
         self.search = QLineEdit()
+        self.search.setObjectName("terminalExplorerSearch")
         self.search.setPlaceholderText("Filter files…")
         self.search.textChanged.connect(self._filter)
         root.addWidget(self.search)
@@ -225,7 +232,7 @@ class TerminalFileExplorer(QWidget):
         self.tree.setIndentation(14)
         self.tree.setUniformRowHeights(True)
         self.tree.setAnimated(True)
-        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tree.setExpandsOnDoubleClick(False)
         self.tree.itemExpanded.connect(self._expanded)
         self.tree.itemDoubleClicked.connect(self._activated)
@@ -234,7 +241,7 @@ class TerminalFileExplorer(QWidget):
         root.addWidget(self.tree, 1)
 
         self.status = QLabel("Waiting for shell directory…")
-        self.status.setObjectName("muted")
+        self.status.setObjectName("terminalExplorerStatus")
         root.addWidget(self.status)
 
         self.setStyleSheet(
@@ -261,17 +268,80 @@ class TerminalFileExplorer(QWidget):
 
     def _button(self, icon_name: str, tooltip: str, callback):
         b = QToolButton()
+        b.setObjectName("feNav")
         b.setAutoRaise(True)
         b.setFixedSize(26, 26)
         b.setToolTip(tooltip)
+        b.setProperty("sshdockIconName", icon_name)
         try:
             import qtawesome as qta
-            b.setIcon(qta.icon(icon_name, color="#aebccc"))
+            theme = str(QApplication.instance().property("sshdockTheme") or "dark").lower()
+            b.setIcon(qta.icon(icon_name, color="#475569" if theme == "light" else "#aebccc"))
             b.setIconSize(QSize(12, 12))
         except Exception:
             b.setText("•")
         b.clicked.connect(lambda _=False: callback())
         return b
+
+    def apply_theme(self, theme: str | None = None) -> None:
+        name = str(theme or QApplication.instance().property("sshdockTheme") or "dark").lower()
+        try:
+            import qtawesome as qta
+            color = "#475569" if name == "light" else "#aebccc"
+            for button in self.findChildren(QToolButton):
+                icon_name = button.property("sshdockIconName")
+                if icon_name:
+                    button.setIcon(qta.icon(str(icon_name), color=color))
+        except Exception:
+            pass
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+    async def upload_files(self):
+        files, _ = QFileDialog.getOpenFileNames(self, "Upload files")
+        if not files:
+            return
+        ok = 0
+        for local in files:
+            try:
+                name = os.path.basename(local)
+                await self.backend.upload(local, posixpath.join(self.current_path, name))
+                ok += 1
+            except Exception as exc:
+                self.status.setText(f"Upload failed: {str(exc)[:100]}")
+                break
+        self.status.setText(f"Uploaded {ok}/{len(files)} file(s) to {self.current_path}")
+        self._show_path()
+
+    async def download_selected(self):
+        items = self.tree.selectedItems()
+        entries = []
+        for item in items:
+            data = item.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(data, Entry):
+                entries.append(data)
+        if not entries:
+            self.status.setText("Select one or more files to download.")
+            return
+        dirs = [e for e in entries if e.is_dir]
+        if dirs:
+            self.status.setText("Folder download will be added to the transfer manager; select files for now.")
+        entries = [e for e in entries if not e.is_dir]
+        if not entries:
+            return
+        target = QFileDialog.getExistingDirectory(self, "Download to")
+        if not target:
+            return
+        ok = 0
+        for ent in entries:
+            try:
+                await self.backend.download(ent.path, os.path.join(target, ent.name))
+                ok += 1
+            except Exception as exc:
+                self.status.setText(f"Download failed: {str(exc)[:100]}")
+                break
+        self.status.setText(f"Downloaded {ok}/{len(entries)} file(s)")
 
     def _normalize(self, path: str) -> str:
         path = posixpath.normpath(path or "/")
@@ -447,8 +517,15 @@ class TerminalFileExplorer(QWidget):
         menu = QMenu(self)
         if isinstance(data, Entry):
             open_action = menu.addAction("Open / Edit" if not data.is_dir else "Open folder")
+            if data.is_dir:
+                cd_action = menu.addAction("cd in terminal")
+                download_action = None
+            else:
+                cd_action = None
+                download_action = menu.addAction("Download")
+            menu.addSeparator()
             copy_action = menu.addAction("Copy path")
-            cd_action = menu.addAction("cd in terminal") if data.is_dir else None
+            upload_action = menu.addAction("Upload here")
             chosen = menu.exec(self.tree.viewport().mapToGlobal(pos))
             if chosen is open_action:
                 self._activated(item, 0)
@@ -457,15 +534,33 @@ class TerminalFileExplorer(QWidget):
                 QApplication.clipboard().setText(data.path)
             elif cd_action is not None and chosen is cd_action:
                 self.change_dir(data.path)
+            elif download_action is not None and chosen is download_action:
+                self._spawn(self.download_one(data))
+            elif chosen is upload_action:
+                self._spawn(self.upload_files())
         elif isinstance(data, dict) and data.get("dir"):
             cd_action = menu.addAction("cd in terminal")
             copy_action = menu.addAction("Copy path")
+            upload_action = menu.addAction("Upload here")
             chosen = menu.exec(self.tree.viewport().mapToGlobal(pos))
             if chosen is cd_action:
                 self.change_dir(data["path"])
             elif chosen is copy_action:
                 from PySide6.QtWidgets import QApplication
                 QApplication.clipboard().setText(data["path"])
+            elif chosen is upload_action:
+                self._spawn(self.upload_files())
+
+    async def download_one(self, ent: Entry):
+        target = QFileDialog.getSaveFileName(self, "Download file", ent.name)[0]
+        if not target:
+            return
+        try:
+            await self.backend.download(ent.path, target)
+            self.status.setText(f"Downloaded {ent.name}")
+        except Exception as exc:
+            self.status.setText(f"Download failed: {str(exc)[:100]}")
+
 
     def _spawn(self, coro):
         try:
