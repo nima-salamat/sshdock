@@ -26,3 +26,16 @@ def test_terminal_explorer_restores_button_factory():
     assert "QFileDialog, QApplication," in src
     assert "def _button(self, icon_name: str, tooltip: str, callback):" in src
     assert "self.up_btn = self._button(" in src
+
+
+def test_terminal_webengine_fit_api_is_real_and_syncs_overlay():
+    src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    assert "fit: function ()" in src
+    assert "fitAddon.fit();" in src
+    assert "window._sshdockSync()" in src
+
+
+def test_terminal_webengine_keeps_proven_first_commit_load_order():
+    src = (ROOT / "app/terminal/web_widget.py").read_text(encoding="utf-8")
+    assert "self._view.show()" in src
+    assert "QTimer.singleShot(80, self._flush_pending)" in src
