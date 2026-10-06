@@ -184,13 +184,17 @@ class TerminalFileExplorer(QWidget):
         self.count_label.setObjectName("muted")
         header.addWidget(self.count_label)
         header.addStretch()
-        self.up_btn = self._button("fa5s.level-up-alt", "Parent directory", self.go_up)
+        # Search replaces the old dedicated parent-directory button. The parent
+        # directory is now represented by a ".." item in the filesystem list.
+        self.search_btn = self._button("fa5s.search", "Search files", self._toggle_search)
+        self.search_btn.setCheckable(True)
+        self.search_btn.setAutoRaise(True)
         self.refresh_btn = self._button("fa5s.sync-alt", "Refresh", self.refresh)
         self.upload_btn = self._button("fa5s.upload", "Upload files here", self.upload_files)
         self.upload_folder_btn = self._button("fa5s.folder-plus", "Upload folder here", self.upload_folder)
         self.download_btn = self._button("fa5s.download", "Download selected files/folders", self.download_selected)
         self.close_btn = self._button("fa5s.times", "Close explorer", self.closed_requested.emit)
-        header.addWidget(self.up_btn)
+        header.addWidget(self.search_btn)
         header.addWidget(self.refresh_btn)
         header.addWidget(self.upload_btn)
         header.addWidget(self.upload_folder_btn)
@@ -198,16 +202,21 @@ class TerminalFileExplorer(QWidget):
         header.addWidget(self.close_btn)
         root.addLayout(header)
 
-        self.path_edit = QLineEdit()
-        self.path_edit.setObjectName("terminalExplorerPath")
-        self.path_edit.setPlaceholderText("Current shell directory")
-        self.path_edit.returnPressed.connect(self._go_path_from_edit)
-        root.addWidget(self.path_edit)
+        self.path_label = QLabel("/")
+        self.path_label.setObjectName("terminalExplorerPathLabel")
+        self.path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.path_label.setToolTip("/")
+        self.path_label.setSizePolicy(
+            self.path_label.sizePolicy().horizontalPolicy(),
+            self.path_label.sizePolicy().verticalPolicy(),
+        )
+        root.addWidget(self.path_label)
 
         self.search = QLineEdit()
         self.search.setObjectName("terminalExplorerSearch")
-        self.search.setPlaceholderText("Filter files…")
+        self.search.setPlaceholderText("Search files by name, path or type…")
         self.search.textChanged.connect(self._filter)
+        self.search.setVisible(False)
         root.addWidget(self.search)
 
         self.tree = QTreeWidget()
@@ -348,7 +357,8 @@ class TerminalFileExplorer(QWidget):
         normalized = self._normalize(path)
         changed = normalized != self.current_path
         self.current_path = normalized
-        self.path_edit.setText(normalized)
+        self.path_label.setText(normalized)
+        self.path_label.setToolTip(normalized)
         if changed or refresh:
             self._show_path()
 
@@ -359,9 +369,30 @@ class TerminalFileExplorer(QWidget):
         self._loading_paths.clear()
         self.status.setText("Loading…")
         self.count_label.setText("")
+
+        # A filesystem-relative ".." entry is always the first item when a
+        # parent directory exists. It behaves like navigation, not a fake folder.
+        parent = posixpath.dirname(self.current_path.rstrip("/")) or "/"
+        if self.current_path != "/":
+            parent_item = QTreeWidgetItem([".."])
+            parent_item.setData(0, Qt.ItemDataRole.UserRole, {
+                "parent": True,
+                "path": parent,
+            })
+            parent_item.setToolTip(0, f"Parent directory: {parent}")
+            try:
+                theme = str(QApplication.instance().property("sshdockTheme") or "dark").lower()
+                parent_item.setIcon(0, self._icon_for("fa5s.level-up-alt", "#475569" if theme == "light" else "#aebccc"))
+            except Exception:
+                pass
+            self.tree.addTopLevelItem(parent_item)
+
         root = self._make_dir_item(self.current_path, display=self.current_path)
-        self.tree.addTopLevelItem(root)
+        root.setHidden(True)
         root.setExpanded(True)
+        # Keep the actual directory item as the loading anchor, but do not show
+        # it as an extra "current folder" row in the visible filesystem list.
+        self.tree.addTopLevelItem(root)
         if self.current_path not in self._loading_paths and self.current_path not in self._loaded_paths:
             self._spawn(self._load_directory(self.current_path))
 
@@ -448,26 +479,57 @@ class TerminalFileExplorer(QWidget):
                 self.change_dir(data.path)
                 return
             self._spawn(self._open_file(data))
-        elif isinstance(data, dict) and data.get("dir"):
-            path = data.get("path") or self.current_path
-            if path != self.current_path:
-                self.change_dir(path)
-
-    def _go_path_from_edit(self):
-        self.change_dir(self._normalize(self.path_edit.text()))
+        elif isinstance(data, dict):
+            if data.get("parent"):
+                self.change_dir(data.get("path") or "/")
+                return
+            if data.get("dir"):
+                path = data.get("path") or self.current_path
+                if path != self.current_path:
+                    self.change_dir(path)
 
     def go_up(self):
         target = posixpath.dirname(self.current_path.rstrip("/")) or "/"
         self.change_dir(target)
+
+    def _toggle_search(self):
+        opened = self.search_btn.isChecked()
+        self.search.setVisible(opened)
+        if opened:
+            self.search.setFocus(Qt.FocusReason.OtherFocusReason)
+        else:
+            self.search.clear()
 
     def refresh(self):
         self._show_path()
 
     def _filter(self):
         query = self.search.text().strip().lower()
-        root = self.tree.topLevelItem(0)
+        root = self._items_by_path.get(self.current_path)
         if root is None:
             return
+
+        def matches(data, name: str) -> bool:
+            if not query:
+                return True
+            parts = [name]
+            if isinstance(data, Entry):
+                parts.extend([
+                    str(data.path or ""),
+                    "directory" if data.is_dir else "file",
+                ])
+                try:
+                    ft = classify(data.name, is_dir=data.is_dir)
+                    parts.extend([str(ft.key or ""), str(ft.icon or "")])
+                except Exception:
+                    pass
+            elif isinstance(data, dict):
+                parts.extend([
+                    str(data.get("path") or ""),
+                    "directory" if data.get("dir") else "",
+                ])
+            haystack = " ".join(parts).lower()
+            return query in haystack
 
         def walk(node: QTreeWidgetItem) -> bool:
             any_child = False
@@ -475,7 +537,7 @@ class TerminalFileExplorer(QWidget):
                 child = node.child(i)
                 data = child.data(0, Qt.ItemDataRole.UserRole)
                 name = (child.text(0) or "").strip().lower()
-                match = not query or query in name
+                match = matches(data, name)
                 is_dir = (isinstance(data, dict) and data.get("dir")) or (
                     isinstance(data, Entry) and data.is_dir
                 )
@@ -489,6 +551,12 @@ class TerminalFileExplorer(QWidget):
             return any_child
 
         walk(root)
+        # Keep ".." visible as navigation even while searching.
+        for i in range(self.tree.topLevelItemCount()):
+            top = self.tree.topLevelItem(i)
+            data = top.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(data, dict) and data.get("parent"):
+                top.setHidden(False)
 
     async def _open_file(self, ent: Entry):
         self.status.setText(f"Opening {ent.name}…")
