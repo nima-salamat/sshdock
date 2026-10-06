@@ -19,18 +19,11 @@ async def async_main(app: QApplication) -> None:
     prefs = SettingsStore().load_ui_prefs()
     app.setProperty("sshdockTheme", str(prefs.get("theme") or "dark").lower())
     app.setStyleSheet(theme_stylesheet(str(prefs.get("theme") or "dark")))
-    # Faster tooltips app-wide (Qt still has a small initial delay; duration is show time)
-    try:
-        from PySide6.QtWidgets import QToolTip
-        from PySide6.QtGui import QFont
-        # Style tip appearance; delay is partially controlled per-widget via setToolTipDuration
-        app.setStyleSheet(DARK + "\nQToolTip { padding:6px 8px; border:1px solid #2a313a; background:#15191f; color:#e9edf2; }")
-    except Exception:
-        pass
+    # Keep tooltip styling inside the active theme stylesheet. Do not replace
+    # the theme here or Light mode will silently fall back to dark colors.
 
     store = SettingsStore()
     profiles = store.load_profiles()
-    prefs = store.load_ui_prefs()
     aliases = discover_aliases()
     dialog = ConnectionDialog(profiles, aliases, store=store)
     # Multi-monitor: center on cursor screen / clamp above taskbar (also done in showEvent)
