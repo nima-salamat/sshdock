@@ -1906,7 +1906,15 @@ class MainWindow(QMainWindow):
             for nav in self._nav_buttons.values():
                 if hasattr(nav, "set_theme"):
                     nav.set_theme(theme)
-            for widget in self.findChildren(QWidget):
+            # Refresh only widgets which own dynamic/theme-sensitive assets.
+            theme_targets = [
+                getattr(self, "server_file_browser", None),
+                getattr(self, "terminal_file_browser", None),
+                getattr(self, "_resource_monitor_dialog", None),
+            ]
+            for dialog in getattr(self, "_container_file_dialogs", set()):
+                theme_targets.append(dialog)
+            for widget in theme_targets:
                 apply_theme = getattr(widget, "apply_theme", None)
                 if callable(apply_theme):
                     apply_theme(theme)
