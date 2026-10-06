@@ -266,7 +266,7 @@ def test_terminal_explorer_supports_archive_extract_via_visible_terminal():
     assert '.lz4' in types and '.lzma' in types
     assert '*.7z|*.cab|*.iso|*.jar|*.war|*.ear|*.apk' in src
     assert 'elif base == "xz":' in src
-    assert 'elif [ "xz" = "xz" ]; then' in src
+    assert 'elif [ "{kind}" = "xz" ]; then' in src
 
 
 def test_terminal_explorer_fixes_runtime_imports_used_by_media_and_transfer_features():
