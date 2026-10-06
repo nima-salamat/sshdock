@@ -70,3 +70,30 @@ def test_terminal_bootstrap_uses_non_pty_exec_and_controlled_bash_rc():
     assert 'self.ssh.start_command("cat > " + shlex.quote(path))' in text
     assert "--noprofile --rcfile" in text
     assert "DOCKER_PRETTY_SH" in text
+
+
+def test_containers_use_native_qt_checkbox_state_api():
+    source = (
+        Path(__file__).parents[1] / "app/ui/pages/containers_page.py"
+    ).read_text(encoding="utf-8")
+    assert "stateChanged.connect" not in source
+    assert "int(Qt.CheckState.Checked)" not in source
+    assert "itemChanged.connect(self._on_check_changed)" in source
+    assert "item.checkState() == Qt.CheckState.Checked" in source
+
+
+def test_live_tables_share_auto_refresh_control():
+    helpers = (
+        Path(__file__).parents[1] / "app/ui/widgets/helpers.py"
+    ).read_text(encoding="utf-8")
+    main = (
+        Path(__file__).parents[1] / "app/ui/main_window.py"
+    ).read_text(encoding="utf-8")
+    assert "class AutoRefreshControl" in helpers
+    assert '("Off", 0)' in helpers
+    assert '("2 seconds", 2)' in helpers
+    assert '("5 seconds", 5)' in helpers
+    assert '("10 seconds", 10)' in helpers
+    assert '("30 seconds", 30)' in helpers
+    for key in ("containers", "stats", "images", "volumes", "networks", "overview", "server"):
+        assert f'"{key}"' in main
