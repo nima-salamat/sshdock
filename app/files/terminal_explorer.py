@@ -136,14 +136,14 @@ class _TransferDialog(QDialog):
 
 
 class _EditorWorkspace(QWidget):
-    """Independent non-modal multi-tab editor (VSCode-style)."""
+    """Independent non-modal multi-tab editor with media preview support."""
 
-    def __init__(self, backend: ServerFileBackend, parent=None):
-        super().__init__(None)  # true top-level window
+    def __init__(self, backend, parent=None):
+        super().__init__(None)
         self.backend = backend
         self.setWindowTitle("Editor")
-        self.resize(1000, 680)
-        self.setMinimumSize(480, 320)
+        self.resize(1100, 760)
+        self.setMinimumSize(520, 360)
         self.setWindowFlags(
             Qt.WindowType.Window
             | Qt.WindowType.WindowCloseButtonHint
@@ -151,7 +151,7 @@ class _EditorWorkspace(QWidget):
         )
         self.setWindowModality(Qt.WindowModality.NonModal)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
-        self._tabs: dict[str, tuple[QWidget, QPlainTextEdit, QLabel]] = {}
+        self._tabs = {}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -173,16 +173,8 @@ class _EditorWorkspace(QWidget):
         foot.addWidget(self.global_status, 1)
         root.addLayout(foot)
 
-    def open_file(self, path: str, content: str, *, writable: bool = True):
-        if path in self._tabs:
-            widget, _view, _st = self._tabs[path]
-            idx = self.tabs.indexOf(widget)
-            if idx >= 0:
-                self.tabs.setCurrentIndex(idx)
-            self.show()
-            self.raise_()
-            return
-
+    @staticmethod
+    def _text_editor(path, content, writable, backend):
         page = QWidget()
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -194,6 +186,7 @@ class _EditorWorkspace(QWidget):
         path_lbl.setObjectName("editorPath")
         path_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         toolbar.addWidget(path_lbl, 1)
+
         save_btn = None
         if writable:
             save_btn = QPushButton("Save")
@@ -203,7 +196,7 @@ class _EditorWorkspace(QWidget):
 
         view = QPlainTextEdit()
         view.setReadOnly(not writable)
-        view.setPlainText(content[: 2 * 1024 * 1024])
+        view.setPlainText((content or "")[: 2 * 1024 * 1024])
         view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         font = QFont("Cascadia Code")
         if not font.exactMatch():
@@ -219,50 +212,326 @@ class _EditorWorkspace(QWidget):
         status.setContentsMargins(10, 2, 10, 6)
         lay.addWidget(status)
 
+        return page, view, status, save_btn
+
+    def open_file(self, path, content, *, writable=True):
+        if path in self._tabs:
+            idx = self.tabs.indexOf(self._tabs[path]["widget"])
+            if idx >= 0:
+                self.tabs.setCurrentIndex(idx)
+            self.show()
+            self.raise_()
+            return
+
+        page, view, status, save_btn = self._text_editor(path, content, writable, self.backend)
+        toolbar = page.layout().itemAt(0).layout()
         name = posixpath.basename(path) or path
         idx = self.tabs.addTab(page, name)
         self.tabs.setTabToolTip(idx, path)
         self.tabs.setCurrentIndex(idx)
-        self._tabs[path] = (page, view, status)
+        record = {
+            "widget": page, "view": view, "status": status,
+            "task": None, "cleanup": None, "player": None, "temp": None,
+        }
+        self._tabs[path] = record
 
         if save_btn is not None:
             def _save(p=path, v=view, st=status):
                 st.setText("Saving…")
-                text = v.toPlainText()
-
+                value = v.toPlainText()
                 async def _do():
                     try:
-                        await self.backend.write_text(p, text)
+                        await self.backend.write_text(p, value)
                         st.setText("Saved")
                         self.global_status.setText(f"Saved {posixpath.basename(p)}")
                     except Exception as exc:
                         st.setText(f"Save failed: {exc}")
-                        self.global_status.setText(f"Save failed: {str(exc)[:100]}")
-
+                        self.global_status.setText(f"Save failed: {str(exc)[:120]}")
                 try:
                     from app.core.runtime import create_task
                     create_task(_do(), name="editor-save")
                 except Exception:
                     pass
-
             save_btn.clicked.connect(_save)
 
         self.show()
         self.raise_()
         view.setFocus(Qt.FocusReason.OtherFocusReason)
 
-    def _close_tab(self, index: int):
+    def open_media(self, path, *, is_video):
+        if path in self._tabs:
+            idx = self.tabs.indexOf(self._tabs[path]["widget"])
+            if idx >= 0:
+                self.tabs.setCurrentIndex(idx)
+            self.show()
+            self.raise_()
+            return self._tabs[path].get("task")
+
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        toolbar = QHBoxLayout()
+        toolbar.setContentsMargins(10, 6, 10, 6)
+        path_lbl = QLabel(path)
+        path_lbl.setObjectName("editorPath")
+        path_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        toolbar.addWidget(path_lbl, 1)
+        transfer_status = QLabel("Preparing…")
+        transfer_status.setObjectName("editorStatus")
+        toolbar.addWidget(transfer_status)
+        stop_download = QPushButton("Stop download")
+        toolbar.addWidget(stop_download)
+        lay.addLayout(toolbar)
+
+        inner = QTabWidget()
+        inner.setDocumentMode(True)
+        preview = QWidget()
+        preview_lay = QVBoxLayout(preview)
+        preview_lay.setContentsMargins(10, 10, 10, 10)
+        preview_lay.setSpacing(8)
+        preview_status = QLabel("Downloading…")
+        preview_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        preview_lay.addWidget(preview_status)
+
+        player = None
+        video_widget = None
+        image_label = None
+        if is_video and HAS_MEDIA:
+            video_widget = QVideoWidget()
+            preview_lay.addWidget(video_widget, 1)
+            controls = QHBoxLayout()
+            play_btn = QPushButton("Play / Pause")
+            stop_btn = QPushButton("Stop")
+            controls.addWidget(play_btn)
+            controls.addWidget(stop_btn)
+            controls.addStretch()
+            preview_lay.addLayout(controls)
+            player = QMediaPlayer()
+            audio = QAudioOutput()
+            audio.setVolume(1.0)
+            player.setAudioOutput(audio)
+            player.setVideoOutput(video_widget)
+            play_btn.clicked.connect(
+                lambda: player.pause()
+                if player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+                else player.play()
+            )
+            stop_btn.clicked.connect(player.stop)
+            player.errorOccurred.connect(
+                lambda *_: preview_status.setText("Video preview will start when enough data is available.")
+            )
+        elif is_video:
+            note = QLabel("Qt Multimedia is unavailable, but the file can still be downloaded and opened as source.")
+            note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            preview_lay.addWidget(note, 1)
+        else:
+            image_label = QLabel()
+            image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            preview_lay.addWidget(image_label, 1)
+
+        inner.addTab(preview, "Preview")
+
+        source_page, source_view, source_status, _ = self._text_editor(
+            path, "", False, self.backend
+        )
+        source_view.setPlaceholderText("Loading binary source preview…")
+        inner.addTab(source_page, "Source")
+        inner.currentChanged.connect(
+            lambda idx, p=path, v=source_view, st=source_status:
+                self._load_media_source(p, v, st) if idx == 1 and not v.toPlainText() else None
+        )
+        lay.addWidget(inner, 1)
+
+        name = posixpath.basename(path) or path
+        idx = self.tabs.addTab(page, name)
+        self.tabs.setTabToolTip(idx, path)
+        self.tabs.setCurrentIndex(idx)
+
+        record = {
+            "widget": page, "view": source_view, "status": transfer_status,
+            "task": None, "cleanup": None, "player": player,
+            "temp": None, "stop": None,
+        }
+        self._tabs[path] = record
+
+        async def _download():
+            suffix = posixpath.splitext(path)[1]
+            temp = tempfile.NamedTemporaryFile(
+                prefix="sshdock-media-", suffix=suffix, delete=False
+            )
+            temp_path = temp.name
+            temp.close()
+            record["temp"] = temp_path
+            started = time.monotonic()
+            last_ui = [0.0]
+
+            def progress(_src, _dst, done, total):
+                now = time.monotonic()
+                if now - last_ui[0] < 0.12 and done != total:
+                    return
+                last_ui[0] = now
+                elapsed = max(0.001, now - started)
+                rate = done / elapsed
+                percent = int(done * 100 / total) if total else 0
+                text = f"Downloading · {percent}% · {_human_size(done)} / {_human_size(total)} · {_human_size(rate)}/s"
+                transfer_status.setText(text)
+                preview_status.setText(text)
+                if image_label is not None and os.path.exists(temp_path):
+                    try:
+                        pixmap = QPixmap(temp_path)
+                        if not pixmap.isNull():
+                            image_label.setPixmap(
+                                pixmap.scaled(
+                                    image_label.size(),
+                                    Qt.AspectRatioMode.KeepAspectRatio,
+                                    Qt.TransformationMode.SmoothTransformation,
+                                )
+                            )
+                    except Exception:
+                        pass
+
+            async def _try_video():
+                if player is None or not os.path.exists(temp_path):
+                    return
+                try:
+                    size = os.path.getsize(temp_path)
+                except OSError:
+                    return
+                if size < 64 * 1024:
+                    return
+                try:
+                    if player.source().isEmpty():
+                        player.setSource(QUrl.fromLocalFile(temp_path))
+                        player.play()
+                except Exception:
+                    pass
+
+            record["stop"] = lambda: (task.cancel() if record.get("task") is not None else None)
+            try:
+                await self.backend.download(path, temp_path, progress_handler=progress)
+                if player is not None:
+                    await _try_video()
+                if image_label is not None and os.path.exists(temp_path):
+                    try:
+                        pixmap = QPixmap(temp_path)
+                        if not pixmap.isNull():
+                            image_label.setPixmap(
+                                pixmap.scaled(
+                                    image_label.size(),
+                                    Qt.AspectRatioMode.KeepAspectRatio,
+                                    Qt.TransformationMode.SmoothTransformation,
+                                )
+                            )
+                    except Exception:
+                        pass
+                transfer_status.setText("Ready")
+                preview_status.setText("Download complete")
+                stop_download.setText("Close preview")
+                try:
+                    stop_download.clicked.disconnect()
+                except Exception:
+                    pass
+                stop_download.clicked.connect(lambda: self._cleanup_record(path))
+                if player is not None:
+                    await _try_video()
+            except asyncio.CancelledError:
+                transfer_status.setText("Stopped")
+                preview_status.setText("Download stopped")
+                stop_download.setText("Close preview")
+                try:
+                    stop_download.clicked.disconnect()
+                except Exception:
+                    pass
+                stop_download.clicked.connect(lambda: self._cleanup_record(path))
+                raise
+            except Exception as exc:
+                transfer_status.setText("Failed")
+                preview_status.setText(f"Download failed: {str(exc)[:160]}")
+                stop_download.setText("Close preview")
+                try:
+                    stop_download.clicked.disconnect()
+                except Exception:
+                    pass
+                stop_download.clicked.connect(lambda: self._cleanup_record(path))
+            finally:
+                record["stop"] = None
+
+        async def _source_loader():
+            source_status.setText("Loading source…")
+            try:
+                value = await self.backend.read_text(path, limit=2 * 1024 * 1024)
+                source_view.setPlainText(value)
+                source_status.setText("Read-only source preview")
+            except Exception as exc:
+                source_status.setText(f"Source unavailable: {str(exc)[:120]}")
+
+        def _cleanup():
+            task = record.get("task")
+            if task is not None and not task.done():
+                task.cancel()
+            try:
+                if player is not None:
+                    player.stop()
+                    if QUrl is not None:
+                        player.setSource(QUrl())
+            except Exception:
+                pass
+            temp_path = record.get("temp")
+            if temp_path:
+                try:
+                    if os.path.exists(temp_path):
+                        os.unlink(temp_path)
+                except OSError:
+                    pass
+
+        record["cleanup"] = _cleanup
+        self._media_source_loaders = getattr(self, "_media_source_loaders", {})
+        self._media_source_loaders[path] = _source_loader
+        self.show()
+        self.raise_()
+
+        try:
+            from app.core.runtime import create_task
+            task = create_task(_download(), name="editor-media-download")
+            record["task"] = task
+        except Exception:
+            record["task"] = None
+
+        stop_download.clicked.connect(record["stop"])
+        return record["task"]
+
+    def _load_media_source(self, path, view, status):
+        loader = getattr(self, "_media_source_loaders", {}).get(path)
+        if loader is None:
+            return
+        try:
+            from app.core.runtime import create_task
+            create_task(loader(), name="editor-media-source")
+        except Exception:
+            pass
+
+    def _cleanup_record(self, path):
+        record = self._tabs.get(path)
+        if record is None:
+            return
+        cleanup = record.get("cleanup")
+        if callable(cleanup):
+            cleanup()
+
+    def _close_tab(self, index):
         widget = self.tabs.widget(index)
         if widget is None:
             return
-        path = None
-        for p, (w, _v, _s) in list(self._tabs.items()):
-            if w is widget:
-                path = p
-                break
+        path = next((p for p, rec in self._tabs.items() if rec.get("widget") is widget), None)
         self.tabs.removeTab(index)
         if path is not None:
-            self._tabs.pop(path, None)
+            record = self._tabs.pop(path, {})
+            cleanup = record.get("cleanup")
+            if callable(cleanup):
+                cleanup()
+            getattr(self, "_media_source_loaders", {}).pop(path, None)
         if self.tabs.count() == 0:
             self.hide()
 
