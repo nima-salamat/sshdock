@@ -46,7 +46,7 @@ class _Bridge(QObject):
         if cols > 0 and rows > 0:
             self.resize_received.emit(int(cols), int(rows))
 
-    @Slot(str)
+    @Slot()
     def report_cwd(self, path: str) -> None:
         if path:
             self.cwd_changed.emit(path)
@@ -70,9 +70,6 @@ class XtermTerminalWidget(QWidget):
         self._pending_writes: list[str] = []
         self._last_size: tuple[int, int] | None = None
         self._pending_font: tuple[str, int] | None = None
-        self._fit_timer = QTimer(self)
-        self._fit_timer.setSingleShot(True)
-        self._fit_timer.timeout.connect(self._fit_terminal_now)
         self._theme_name = "light" if str(theme).lower() == "light" else "dark"
         self._bg = _BG_LIGHT if self._theme_name == "light" else _BG_DARK
         self._bridge = _Bridge()
@@ -105,10 +102,6 @@ class XtermTerminalWidget(QWidget):
             return
 
         self._view = QWebEngineView(self)
-        self._view.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
-        self._view.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self._paint_chrome(self._bg)
 
         settings = self._view.settings()
@@ -245,24 +238,23 @@ class XtermTerminalWidget(QWidget):
         # cannot flash its default white page on first paint.
         self._paint_chrome(self._bg)
         if ok:
-            # Keep the WebEngine surface hidden and do not flush terminal data
-            # until QWebChannel/xterm has reported page readiness.
-            pass
+            self._view.show()
+            self._load_placeholder.hide()
+            QTimer.singleShot(80, self._flush_pending)
         else:
             self._load_placeholder.setText("Terminal engine failed to load")
 
     def _on_page_ready(self) -> None:
         self._ready = True
         if self._view is not None:
-            # Configure the page before the first visible WebEngine paint.
-            self._paint_chrome(self._bg)
+            self._view.show()
         self._load_placeholder.hide()
+        self._paint_chrome(self._bg)
+        self._flush_pending()
+        # Apply any font/theme queued before JS was ready
         self.apply_theme(getattr(self, "_theme_name", "dark"))
         self._push_font_to_js()
-        self._flush_pending()
-        if self._view is not None:
-            self._view.show()
-        self._schedule_fit(0)
+        self._run_js("window.sshdockTerm && window.sshdockTerm.fit && window.sshdockTerm.fit();")
 
     def _request_find(self) -> None:
         try:
@@ -365,19 +357,11 @@ class XtermTerminalWidget(QWidget):
         if self._view is not None:
             self._view.setFocus(Qt.FocusReason.OtherFocusReason)
 
-    def _fit_terminal_now(self) -> None:
-        if not self._ready or self._view is None:
-            return
-        self._run_js("window.sshdockTerm && window.sshdockTerm.fit && window.sshdockTerm.fit();")
-
-    def _schedule_fit(self, delay: int = 80) -> None:
-        if self._view is None:
-            return
-        self._fit_timer.start(max(0, int(delay)))
-
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._schedule_fit()
+        QTimer.singleShot(50, lambda: self._run_js(
+            "window.sshdockTerm && window.sshdockTerm.fit && window.sshdockTerm.fit();"
+        ))
 
     def find_text(self, query: str) -> None:
         import json
