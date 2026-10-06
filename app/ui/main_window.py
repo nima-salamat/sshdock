@@ -245,7 +245,12 @@ class MainWindow(QMainWindow):
         self.terminal_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.terminal_toggle.clicked.connect(lambda _checked=False: self.toggle_terminal_panel())
         try:
-            self.terminal_toggle.setIcon(qta.icon("fa5s.terminal", color="#74a7ff") if qta else QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon))
+            self.terminal_toggle.setProperty("sshdockIconName", "fa5s.terminal")
+            self.terminal_toggle.setProperty("sshdockIconRole", "normal")
+            self.terminal_toggle.setIcon(
+                qta.icon("fa5s.terminal", color=self._ui_icon_color("normal"))
+                if qta else QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
+            )
         except Exception:
             pass
         fl.addWidget(self.terminal_toggle)
