@@ -112,7 +112,7 @@ async def main(port,idle):
     a.server=await asyncio.start_server(a.handle,"127.0.0.1",port)
     sock=(a.server.sockets or [])[0]
     selected=int(sock.getsockname()[1])
-    sys.stdout.write(json.dumps({"protocol":PROTOCOL,"port":selected,"token":token},separators=(",",":"))+"\\n")
+    sys.stdout.write(json.dumps({"protocol":PROTOCOL,"port":selected,"token":token},separators=(",",":"))+"\n")
     sys.stdout.flush()
     await a.stop.wait()
     a.server.close()
