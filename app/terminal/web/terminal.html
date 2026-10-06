@@ -242,6 +242,13 @@
 
       term.open(document.getElementById('terminal'));
 
+      // The native xterm scrollbar is hidden because SSHDock renders it in a
+      // dedicated gutter. Tell FitAddon not to reserve the hidden scrollbar a
+      // second time, otherwise a terminal resize loses an extra ~15px.
+      try {
+        if (term._core && term._core.viewport) term._core.viewport.scrollBarWidth = 0;
+      } catch (e) {}
+
       /*
        * Keep the terminal scrollbar in a real, dedicated gutter outside the
        * xterm canvas. The xterm viewport remains the actual scroll container;
@@ -596,7 +603,9 @@
                 b.style.top=top+'px';
                 b.style.height=height+'px';
                 b.style.left='0px';
-                // width controlled by CSS (right: 14px) so we do not force 100%
+                // The xterm host itself ends before the dedicated scrollbar gutter.
+                // The table therefore uses the full host width without overlapping it.
+                b.style.width='auto';
                 // Only visible while its reserved lines intersect the viewport
                 b.style.display = (top+height>0 && top<viewH) ? 'flex' : 'none';
               }
@@ -656,6 +665,10 @@
           const blocks = window._sshdockTbls || [];
           for (let i = 0; i < blocks.length; i++) {
             const block = blocks[i];
+            if (block && block._anchorMarker) {
+              try { block._anchorMarker.dispose(); } catch (e) {}
+              block._anchorMarker = null;
+            }
             if (block && block.parentNode) block.parentNode.removeChild(block);
           }
           window._sshdockTbls = [];
