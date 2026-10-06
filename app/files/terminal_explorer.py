@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+
 import os
 import posixpath
 from typing import Callable
@@ -255,7 +257,15 @@ class TerminalFileExplorer(QWidget):
             b.setIconSize(QSize(12, 12))
         except Exception:
             b.setText("•")
-        b.clicked.connect(lambda _=False: callback())
+        def invoke_callback():
+            try:
+                result = callback()
+                if inspect.isawaitable(result):
+                    self._spawn(result)
+            except Exception as exc:
+                self.status.setText(f"Action failed: {str(exc)[:120]}")
+
+        b.clicked.connect(lambda _=False: invoke_callback())
         return b
 
     def _icon_for(self, icon_name: str, color: str):
