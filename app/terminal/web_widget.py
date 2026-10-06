@@ -31,6 +31,7 @@ class _Bridge(QObject):
     page_ready = Signal()
     find_requested = Signal()
     cwd_changed = Signal(str)
+    magic_command = Signal(str)
 
     @Slot()
     def request_find(self) -> None:
@@ -78,6 +79,7 @@ class XtermTerminalWidget(QWidget):
         self._bridge.page_ready.connect(self._on_page_ready)
         self._bridge.find_requested.connect(self._request_find)
         self._bridge.cwd_changed.connect(self._on_cwd_changed)
+        self._bridge.magic_command.connect(self._on_magic_command)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -272,6 +274,10 @@ class XtermTerminalWidget(QWidget):
     def _on_cwd_changed(self, path: str) -> None:
         if path:
             self.cwd_changed.emit(path)
+
+    def _on_magic_command(self, payload: str) -> None:
+        if payload:
+            self.magic_command.emit(payload)
 
     def _on_input(self, data: str) -> None:
         self.input_bytes.emit(data.encode("utf-8", "surrogatepass"))
