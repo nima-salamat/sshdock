@@ -226,29 +226,7 @@ class TerminalFileExplorer(QWidget):
         self.status.setObjectName("terminalExplorerStatus")
         root.addWidget(self.status)
 
-        self.setStyleSheet(
-            """
-            QWidget#terminalExplorer {
-                background: #0c1118; border-right: 1px solid #232b35;
-            }
-            QLabel#terminalExplorerTitle {
-                color: #dbe5f2; font-size: 11px; font-weight: 700; letter-spacing: 1px;
-            }
-            QLineEdit#terminalExplorerPath, QLineEdit {
-                background: #090e14; border: 1px solid #252e39; border-radius: 5px;
-                padding: 4px 7px; color: #dfe7f0; selection-background-color: #275e9e;
-            }
-            QTreeWidget#terminalExplorerTree {
-                background: transparent; border: none; outline: none;
-                color: #d9e1eb; font-size: 12px;
-            }
-            QTreeWidget#terminalExplorerTree::item { height: 24px; padding: 1px 0; }
-            QTreeWidget#terminalExplorerTree::item:hover { background: #17202b; }
-            QTreeWidget#terminalExplorerTree::item:selected { background: #1d3857; }
-            """
-        )
-
-    def _button(self, icon_name: str, tooltip: str, callback):
+        # Shared application stylesheet owns the explorer colors.
         b = QToolButton()
         b.setObjectName("feNav")
         b.setAutoRaise(True)
