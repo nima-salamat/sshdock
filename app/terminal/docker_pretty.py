@@ -17,7 +17,7 @@ mdocker() {
   if [ $# -lt 1 ]; then
     printf 'usage: mdocker <ps|images|volume|network|stats|compose|service|system|context|plugin|node|stack|secret|config> [args]\n' >&2
     printf '  short: mdps mdpa mdimg mdvol mdnet mdstats mdcomp mdsvc mddf\n' >&2
-    printf '  or: docker <cmd> --magic   /   mps, mimages, …\n' >&2
+    printf '  native docker is left untouched; use mdocker for inline tables\n' >&2
     return 1
   fi
   __sshdock_magic "$@"
