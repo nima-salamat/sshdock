@@ -1052,6 +1052,11 @@ class RemoteFileBrowser(QWidget):
     def __init__(self, backend, title: str = "Files", parent=None):
         super().__init__(parent)
         self.backend = backend
+        try:
+            import qtawesome as qta
+        except ImportError:
+            qta = None
+        self._qta = qta
         self.title_text = title
         self.tabs = QTabWidget()
         self.tabs.setTabsClosable(True)
