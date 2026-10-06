@@ -46,7 +46,7 @@ class _Bridge(QObject):
         if cols > 0 and rows > 0:
             self.resize_received.emit(int(cols), int(rows))
 
-    @Slot()
+    @Slot(str)
     def report_cwd(self, path: str) -> None:
         if path:
             self.cwd_changed.emit(path)
@@ -70,6 +70,9 @@ class XtermTerminalWidget(QWidget):
         self._pending_writes: list[str] = []
         self._last_size: tuple[int, int] | None = None
         self._pending_font: tuple[str, int] | None = None
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.timeout.connect(self._fit_terminal_now)
         self._theme_name = "light" if str(theme).lower() == "light" else "dark"
         self._bg = _BG_LIGHT if self._theme_name == "light" else _BG_DARK
         self._bridge = _Bridge()
@@ -259,7 +262,7 @@ class XtermTerminalWidget(QWidget):
         self._flush_pending()
         if self._view is not None:
             self._view.show()
-        self._run_js("window.sshdockTerm && window.sshdockTerm.fit && window.sshdockTerm.fit();")
+        self._schedule_fit(0)
 
     def _request_find(self) -> None:
         try:
@@ -362,11 +365,19 @@ class XtermTerminalWidget(QWidget):
         if self._view is not None:
             self._view.setFocus(Qt.FocusReason.OtherFocusReason)
 
+    def _fit_terminal_now(self) -> None:
+        if not self._ready or self._view is None:
+            return
+        self._run_js("window.sshdockTerm && window.sshdockTerm.fit && window.sshdockTerm.fit();")
+
+    def _schedule_fit(self, delay: int = 80) -> None:
+        if self._view is None:
+            return
+        self._fit_timer.start(max(0, int(delay)))
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        QTimer.singleShot(50, lambda: self._run_js(
-            "window.sshdockTerm && window.sshdockTerm.fit && window.sshdockTerm.fit();"
-        ))
+        self._schedule_fit()
 
     def find_text(self, query: str) -> None:
         import json
