@@ -102,6 +102,10 @@ class XtermTerminalWidget(QWidget):
             return
 
         self._view = QWebEngineView(self)
+        self._view.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        self._view.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self._paint_chrome(self._bg)
 
         settings = self._view.settings()
@@ -238,8 +242,8 @@ class XtermTerminalWidget(QWidget):
         # cannot flash its default white page on first paint.
         self._paint_chrome(self._bg)
         if ok:
-            self._view.show()
-            self._load_placeholder.hide()
+            # Keep the WebEngine surface hidden until the JS bridge reports
+            # readiness. This avoids a second paint during Chromium startup.
             QTimer.singleShot(80, self._flush_pending)
         else:
             self._load_placeholder.setText("Terminal engine failed to load")
@@ -247,13 +251,14 @@ class XtermTerminalWidget(QWidget):
     def _on_page_ready(self) -> None:
         self._ready = True
         if self._view is not None:
-            self._view.show()
+            # Configure the page before the first visible WebEngine paint.
+            self._paint_chrome(self._bg)
         self._load_placeholder.hide()
-        self._paint_chrome(self._bg)
-        self._flush_pending()
-        # Apply any font/theme queued before JS was ready
         self.apply_theme(getattr(self, "_theme_name", "dark"))
         self._push_font_to_js()
+        self._flush_pending()
+        if self._view is not None:
+            self._view.show()
         self._run_js("window.sshdockTerm && window.sshdockTerm.fit && window.sshdockTerm.fit();")
 
     def _request_find(self) -> None:
