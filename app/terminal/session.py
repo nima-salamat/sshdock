@@ -4,8 +4,6 @@ import asyncio
 import re
 from uuid import uuid4
 
-from app.terminal.docker_pretty import install_command
-
 from PySide6.QtCore import QObject, Signal
 
 from app.ssh.client import SSHServerConnection, SSHChannel
@@ -41,7 +39,6 @@ class TerminalSession(QObject):
         self._close_lock = asyncio.Lock()
         self.cwd = "/"
         self._osc_buf = b""  # carry partial OSC sequences across reads
-        self._bootstrap_path: str | None = None
 
     async def start(self):
         if self.running or self.channel:
@@ -223,7 +220,6 @@ class TerminalSession(QObject):
                 except Exception:
                     pass
 
-            await self._cleanup_bootstrap()
 
             if self.owned_transport is not None:
                 try:
