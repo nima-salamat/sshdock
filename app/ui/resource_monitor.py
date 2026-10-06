@@ -13,9 +13,14 @@ class GaugeWidget(QWidget):
         self.title = title
         self.suffix = suffix
         self.value = 0.0
+        self._theme_name = "dark"
         self.setMinimumSize(160, 150)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
         self.setObjectName("resourceGauge")
+
+    def apply_theme(self, theme: str | None = None) -> None:
+        self._theme_name = "light" if str(theme or "dark").lower() == "light" else "dark"
+        self.update()
 
     def setValue(self, value: float):
         self.value = max(0.0, min(100.0, float(value)))
@@ -34,9 +39,12 @@ class GaugeWidget(QWidget):
         p.setBrush(Qt.BrushStyle.NoBrush)
         rect = QRectF(cx - radius, cy - radius, radius * 2, radius * 2)
         p.drawArc(rect, 225 * 16, -270 * 16)
-        color = palette.color(palette.ColorRole.Highlight)
-        if self.value >= 85: color = palette.color(palette.ColorRole.BrightText)
-        elif self.value >= 65: color = palette.color(palette.ColorRole.Link)
+        if self.value >= 85:
+            color = QColor("#dc2626" if self._theme_name == "light" else "#ff6b6b")
+        elif self.value >= 65:
+            color = QColor("#d97706" if self._theme_name == "light" else "#ffd866")
+        else:
+            color = palette.color(palette.ColorRole.Highlight)
         p.setPen(QPen(color, 11, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         p.drawArc(rect, 225 * 16, int(-270 * 16 * self.value / 100.0))
         p.setPen(palette.color(palette.ColorRole.Text))
@@ -89,6 +97,14 @@ class ResourceMonitorDialog(QDialog):
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.core_container = QWidget(); self.core_grid = QGridLayout(self.core_container); self.core_grid.setContentsMargins(0,0,0,0); self.core_grid.setSpacing(10)
         scroll.setWidget(self.core_container); root.addWidget(scroll, 1)
+
+    def apply_theme(self, theme: str | None = None) -> None:
+        name = "light" if str(theme or "dark").lower() == "light" else "dark"
+        for gauge in self.findChildren(GaugeWidget):
+            gauge.apply_theme(name)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
 
     def _set_interval(self, text):
         seconds = {"2 s":2, "5 s":5, "10 s":10}.get(text)
