@@ -16,6 +16,9 @@ def test_terminal_integration_preserves_native_docker_command():
     src = (ROOT / "app/terminal/docker_pretty.py").read_text(encoding="utf-8")
     assert "mdocker() {" in src
     assert "# Intentionally do not shadow the real docker command." in src
+    assert "m-docker() {" not in src
+    assert "magic-docker() {" not in src
+    assert "docker() {" not in src.replace("mdocker() {", "")
 
 
 def test_terminal_explorer_restores_button_factory():
