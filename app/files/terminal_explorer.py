@@ -370,29 +370,10 @@ class TerminalFileExplorer(QWidget):
         self.status.setText("Loading…")
         self.count_label.setText("")
 
-        # A filesystem-relative ".." entry is always the first item when a
-        # parent directory exists. It behaves like navigation, not a fake folder.
-        parent = posixpath.dirname(self.current_path.rstrip("/")) or "/"
-        if self.current_path != "/":
-            parent_item = QTreeWidgetItem([".."])
-            parent_item.setData(0, Qt.ItemDataRole.UserRole, {
-                "parent": True,
-                "path": parent,
-            })
-            parent_item.setToolTip(0, f"Parent directory: {parent}")
-            try:
-                theme = str(QApplication.instance().property("sshdockTheme") or "dark").lower()
-                parent_item.setIcon(0, self._icon_for("fa5s.level-up-alt", "#475569" if theme == "light" else "#aebccc"))
-            except Exception:
-                pass
-            self.tree.addTopLevelItem(parent_item)
-
-        root = self._make_dir_item(self.current_path, display=self.current_path)
-        root.setHidden(True)
-        root.setExpanded(True)
-        # Keep the actual directory item as the loading anchor, but do not show
-        # it as an extra "current folder" row in the visible filesystem list.
-        self.tree.addTopLevelItem(root)
+        # Use QTreeWidget's invisible root as the current-directory container.
+        # Its children become the visible top-level filesystem entries.
+        root = self.tree.invisibleRootItem()
+        self._items_by_path[self.current_path] = root
         if self.current_path not in self._loading_paths and self.current_path not in self._loaded_paths:
             self._spawn(self._load_directory(self.current_path))
 
@@ -425,6 +406,25 @@ class TerminalFileExplorer(QWidget):
                 return
             item.takeChildren()
             visible = 0
+
+            parent = posixpath.dirname(path.rstrip("/")) or "/"
+            if path != "/":
+                parent_item = QTreeWidgetItem([".."])
+                parent_item.setData(0, Qt.ItemDataRole.UserRole, {
+                    "parent": True,
+                    "path": parent,
+                })
+                parent_item.setToolTip(0, f"Parent directory: {parent}")
+                theme = str(QApplication.instance().property("sshdockTheme") or "dark").lower()
+                parent_item.setIcon(
+                    0,
+                    self._icon_for(
+                        "fa5s.level-up-alt",
+                        "#475569" if theme == "light" else "#aebccc",
+                    ),
+                )
+                item.addChild(parent_item)
+
             for ent in entries:
                 if ent.is_dir:
                     child = self._make_dir_item(ent.path, display=ent.name)
@@ -507,7 +507,7 @@ class TerminalFileExplorer(QWidget):
         query = self.search.text().strip().lower()
         root = self._items_by_path.get(self.current_path)
         if root is None:
-            return
+            root = self.tree.invisibleRootItem()
 
         def matches(data, name: str) -> bool:
             if not query:
