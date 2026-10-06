@@ -1,5 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
+from contextlib import contextmanager
 import shlex
 import os
 import posixpath
@@ -1097,6 +1098,40 @@ class MainWindow(QMainWindow):
         fl.addWidget(self.server_file_browser, 1)
         self.server_tabs.addTab(files,"Files")
         lay.addWidget(self.server_tabs,1); self.server_tabs.currentChanged.connect(self._server_tab_changed); return page
+
+    @contextmanager
+    def _atomic_table(self, table: QTableWidget, key_columns: tuple[int, ...] = (0,)):
+        selected = set()
+        model = table.selectionModel()
+        if model is not None:
+            for index in model.selectedRows():
+                selected.add(tuple(
+                    (table.item(index.row(), c).text() if table.item(index.row(), c) else "")
+                    for c in key_columns
+                ))
+        scroll = table.verticalScrollBar().value()
+        old_updates = table.updatesEnabled()
+        old_sorting = table.isSortingEnabled()
+        old_signals = table.blockSignals(True)
+        table.setUpdatesEnabled(False)
+        table.setSortingEnabled(False)
+        try:
+            yield
+            if selected:
+                for row in range(table.rowCount()):
+                    key = tuple(
+                        (table.item(row, c).text() if table.item(row, c) else "")
+                        for c in key_columns
+                    )
+                    if key in selected:
+                        table.selectRow(row)
+            table.verticalScrollBar().setValue(min(scroll, table.verticalScrollBar().maximum()))
+        finally:
+            table.blockSignals(old_signals)
+            table.setSortingEnabled(old_sorting)
+            table.setUpdatesEnabled(old_updates)
+            table.viewport().update()
+            table.update()
 
     def _make_columns_resizable(self, table, stretch_cols: set[int] | None = None):
         """Make every column of *table* user-resizable (drag the header dividers).
