@@ -666,7 +666,8 @@ fi
             except json.JSONDecodeError:
                 continue
             if keys:
-                item = {k: item.get(k) for k in keys}
-                item.update({"_raw": item})
+                raw_item = item
+                item = {k: raw_item.get(k) for k in keys}
+                item["_raw"] = raw_item
             items.append(item)
         return items

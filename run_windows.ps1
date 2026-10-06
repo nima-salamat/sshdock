@@ -1,6 +1,11 @@
 $ErrorActionPreference = "Stop"
-if (!(Test-Path .venv)) { python -m venv .venv }
-. .\.venv\Scripts\Activate.ps1
+Set-Location $PSScriptRoot
+
+if (!(Test-Path .venv\Scripts\python.exe)) {
+    py -3 -m venv .venv
+}
+
+.\.venv\Scripts\Activate.ps1
 python -m pip install -U pip
-pip install -r requirements.txt
+python -m pip install -e .
 python -m app.main

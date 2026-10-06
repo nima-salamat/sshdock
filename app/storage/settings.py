@@ -35,8 +35,14 @@ class SettingsStore:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return []
+        if not isinstance(data, dict):
+            return []
+        raw_profiles = data.get("profiles")
+        if not isinstance(raw_profiles, list):
+            return []
+
         profiles: list[SSHProfile] = []
-        for item in data.get("profiles", []):
+        for item in raw_profiles:
             try:
                 profiles.append(SSHProfile.from_dict(item))
             except (TypeError, ValueError):
@@ -89,7 +95,7 @@ class SettingsStore:
         try:
             data = json.loads(self.ui_path.read_text(encoding="utf-8"))
             if isinstance(data, dict):
-                prefs.update({k: data[k] for k in data if k in _DEFAULT_UI or k in data})
+                prefs.update({k: data[k] for k in data if k in _DEFAULT_UI})
         except (OSError, ValueError):
             pass
         return prefs
@@ -101,7 +107,7 @@ class SettingsStore:
         tmp.write_text(json.dumps(merged, indent=2), encoding="utf-8")
         tmp.replace(self.ui_path)
 
-    # ── export / import ───────────────────────────────────────
+    # ── export / import ────────────────────────────────────────
     def export_bundle(self, path: Path) -> None:
         """Write profiles + compose projects + ui prefs to a single JSON file."""
         payload = {
