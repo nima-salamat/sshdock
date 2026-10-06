@@ -98,7 +98,7 @@ class TerminalSession(QObject):
             # Disable PTY echo separately. If stty -echo is embedded in the
             # same input line, the PTY echoes that line before stty executes.
             await asyncio.wait_for(
-                self.channel.write(b"stty -echo 2>/dev/null\\r"),
+                self.channel.write(b"stty -echo 2>/dev/null\r"),
                 timeout=2.0,
             )
             echo_disabled = True
@@ -110,11 +110,11 @@ class TerminalSession(QObject):
             )
             await asyncio.sleep(0.02)
             await asyncio.wait_for(
-                self.channel.write((setup + "\\r").encode("utf-8")),
+                self.channel.write((setup + "\r").encode("utf-8")),
                 timeout=2.5,
             )
             from app.terminal.docker_pretty import install_command
-            pretty = install_command(manage_echo=False) + "\\r"
+            pretty = install_command(manage_echo=False) + "\r"
             await asyncio.sleep(0.05)
             await asyncio.wait_for(
                 self.channel.write(pretty.encode("utf-8")),
@@ -124,7 +124,7 @@ class TerminalSession(QObject):
             if echo_disabled:
                 try:
                     await asyncio.wait_for(
-                        self.channel.write(b"stty echo 2>/dev/null; printf '\\r\\033[K'\\r"),
+                        self.channel.write(b"stty echo 2>/dev/null; printf '\r\033[K'\r"),
                         timeout=2.0,
                     )
                 except Exception:
