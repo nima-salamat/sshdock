@@ -27,16 +27,17 @@ class SessionManager(QObject):
     terminal_added = Signal(str, str)
     terminal_removed = Signal(str, str)
 
-    def __init__(self, worker_shell_count: int = 3):
+    def __init__(self, worker_shell_count: int = 3, remote_agent_enabled: bool = False):
         super().__init__()
         self.credentials = CredentialStore()
         self.worker_shell_count = max(1, min(32, int(worker_shell_count or 3)))
+        self.remote_agent_enabled = bool(remote_agent_enabled)
         self.servers: dict[str, ManagedServer] = {}
 
     def add_server(self, profile: SSHProfile, auth: AuthMaterial | None = None):
         if profile.id in self.servers:
             return self.servers[profile.id]
-        ssh = SSHServerConnection(profile, self.credentials, auth, worker_shell_count=self.worker_shell_count)
+        ssh = SSHServerConnection(profile, self.credentials, auth, worker_shell_count=self.worker_shell_count, remote_agent_enabled=self.remote_agent_enabled)
         managed = ManagedServer(profile, ssh)
         self.servers[profile.id] = managed
         self.server_added.emit(profile.id, profile.name)
@@ -58,6 +59,15 @@ class SessionManager(QObject):
         self.set_worker_shell_count_limit(count)
         await asyncio.gather(
             *(managed.ssh.resize_worker_pool(self.worker_shell_count) for managed in self.servers.values() if managed.ssh.is_connected),
+            return_exceptions=True,
+        )
+
+    async def set_remote_agent_enabled(self, enabled: bool) -> None:
+        """Enable/disable the optional per-connection remote RPC accelerator."""
+        self.remote_agent_enabled = bool(enabled)
+        await asyncio.gather(
+            *(managed.ssh.set_remote_agent_enabled(self.remote_agent_enabled)
+              for managed in self.servers.values() if managed.ssh.is_connected),
             return_exceptions=True,
         )
 
