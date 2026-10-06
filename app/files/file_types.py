@@ -22,7 +22,9 @@ FILES = (
     FileType("sql", "fa5s.database", (".sql",), "sql"),
     FileType("html", "fa5s.code", (".html", ".htm", ".xml", ".svg"), "html"),
     FileType("css", "fa5s.palette", (".css", ".scss", ".sass"), "css"),
-    FileType("image", "fa5s.image", (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico"), None),
+    FileType("image", "fa5s.image", (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico", ".avif", ".heic", ".heif"), None),
+    FileType("video", "fa5s.file-video", (".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".mpeg", ".mpg", ".ts", ".3gp", ".ogv", ".flv", ".wmv"), None),
+    FileType("audio", "fa5s.file-audio", (".mp3", ".wav", ".flac", ".aac", ".m4a", ".ogg", ".oga", ".opus", ".wma", ".aiff", ".aif", ".alac", ".amr", ".ac3", ".mka", ".mid", ".midi"), None),
     FileType("archive", "fa5s.file-archive", (".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".tgz", ".tbz", ".tbz2", ".txz", ".tzst", ".zst", ".lz4", ".lzma", ".cab", ".iso", ".jar", ".war", ".ear", ".apk"), None),
     FileType("log", "fa5s.file-alt", (".log",), "log"),
     FileType("text", "fa5s.file-alt", (".txt", ".conf", ".ini", ".env"), "text"),
@@ -34,6 +36,7 @@ DARK_COLORS = {
     "json": "#d68cff", "yaml": "#d68cff", "toml": "#d68cff",
     "markdown": "#7fb4ff", "shell": "#52e8ff", "sql": "#72d0ff",
     "html": "#ff8c69", "css": "#6fa8ff", "image": "#ffd866",
+    "video": "#ff7aa8", "audio": "#66d9ef",
     "archive": "#c59cff", "log": "#ffb86b", "text": "#9aa6b5",
     "docker": "#6cc4ff", "file": "#9fb0c3", "link": "#b7c7ff",
 }
@@ -42,6 +45,7 @@ LIGHT_COLORS = {
     "json": "#7e22ce", "yaml": "#7e22ce", "toml": "#7e22ce",
     "markdown": "#2563eb", "shell": "#0f766e", "sql": "#0369a1",
     "html": "#c2410c", "css": "#1d4ed8", "image": "#a16207",
+    "video": "#be185d", "audio": "#0e7490",
     "archive": "#7e22ce", "log": "#c2410c", "text": "#64748b",
     "docker": "#0369a1", "file": "#475569", "link": "#4338ca",
 }
