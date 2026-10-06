@@ -319,9 +319,14 @@ class _EditorWorkspace(QWidget):
                 else player.play()
             )
             stop_btn.clicked.connect(player.stop)
-            player.errorOccurred.connect(
-                lambda *_: preview_status.setText("Video preview will start when enough data is available.")
-            )
+            def _video_error(*_):
+                preview_status.setText("Video is still downloading; playback will retry as data arrives.")
+                try:
+                    if QUrl is not None:
+                        player.setSource(QUrl())
+                except Exception:
+                    pass
+            player.errorOccurred.connect(_video_error)
         elif is_video:
             note = QLabel("Qt Multimedia is unavailable, but the file can still be downloaded and opened as source.")
             note.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -351,7 +356,7 @@ class _EditorWorkspace(QWidget):
 
         record = {
             "widget": page, "view": source_view, "status": transfer_status,
-            "task": None, "cleanup": None, "player": player,
+            "task": None, "source_task": None, "cleanup": None, "player": player,
             "temp": None, "stop": None,
         }
         self._tabs[path] = record
@@ -470,6 +475,9 @@ class _EditorWorkspace(QWidget):
                 value = await self.backend.read_text(path, limit=2 * 1024 * 1024)
                 source_view.setPlainText(value)
                 source_status.setText("Read-only source preview")
+            except asyncio.CancelledError:
+                source_status.setText("Source load stopped")
+                raise
             except Exception as exc:
                 source_status.setText(f"Source unavailable: {str(exc)[:120]}")
 
@@ -477,6 +485,9 @@ class _EditorWorkspace(QWidget):
             task = record.get("task")
             if task is not None and not task.done():
                 task.cancel()
+            source_task = record.get("source_task")
+            if source_task is not None and not source_task.done():
+                source_task.cancel()
             try:
                 if player is not None:
                     player.stop()
@@ -509,14 +520,19 @@ class _EditorWorkspace(QWidget):
         return record["task"]
 
     def _load_media_source(self, path, view, status):
+        record = self._tabs.get(path)
+        if record is None:
+            return
+        if record.get("source_task") is not None and not record["source_task"].done():
+            return
         loader = getattr(self, "_media_source_loaders", {}).get(path)
         if loader is None:
             return
         try:
             from app.core.runtime import create_task
-            create_task(loader(), name="editor-media-source")
+            record["source_task"] = create_task(loader(), name="editor-media-source")
         except Exception:
-            pass
+            record["source_task"] = None
 
     def _cleanup_record(self, path):
         record = self._tabs.get(path)
