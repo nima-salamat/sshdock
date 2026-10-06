@@ -3254,6 +3254,7 @@ class MainWindow(QMainWindow):
         self.terminal_file_browser = TerminalFileExplorer(
             backend,
             change_dir=lambda path: self._change_terminal_cwd(path, None),
+            run_command=self._run_terminal_explorer_command,
             parent=self.terminal_file_host,
         )
         self.terminal_file_host.layout().addWidget(self.terminal_file_browser)
@@ -3411,6 +3412,18 @@ class MainWindow(QMainWindow):
             "\r"
         )
         self._spawn(session.write(command.encode("utf-8")), name="Terminal explorer cd")
+
+    def _run_terminal_explorer_command(self, command: str):
+        sid = self.terminal_picker.currentData() if getattr(self, "terminal_picker", None) else None
+        session = self.terms.get(sid) if sid else None
+        if session is None or not session.running:
+            self.statusBar().showMessage("Open a terminal session first", 2500)
+            raise RuntimeError("No active terminal session")
+        payload = (str(command).rstrip() + "\r").encode("utf-8")
+        return self._spawn(
+            session.write(payload),
+            name="Terminal explorer command",
+        )
 
     def _terminal_session_row_changed(self, row: int) -> None:
         if row < 0 or row >= self.terminal_sessions_list.count():
