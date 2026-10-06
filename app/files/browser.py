@@ -896,13 +896,13 @@ class FileViewerPage(QWidget):
         bar.setSpacing(2)
 
         self.path_lbl = QLabel(path)
-        self.path_lbl.setStyleSheet("color:#7a8694; font-size:11px; padding:0 4px;")
+        self.path_lbl.setObjectName("fileViewerPath")
         self.path_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.path_lbl.setToolTip(path)
         bar.addWidget(self.path_lbl, 1)
 
         self.meta_lbl = QLabel("")
-        self.meta_lbl.setStyleSheet("color:#5c6773; font-size:11px; padding-right:6px;")
+        self.meta_lbl.setObjectName("fileViewerMeta")
         bar.addWidget(self.meta_lbl)
 
         try:
@@ -917,7 +917,9 @@ class FileViewerPage(QWidget):
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             if qta:
                 try:
-                    b.setIcon(qta.icon(icon_name, color="#c5d0de"))
+                    theme = str(QApplication.instance().property("sshdockTheme") or "dark").lower()
+                    b.setIcon(qta.icon(icon_name, color="#475569" if theme == "light" else "#c5d0de"))
+                    b.setProperty("sshdockIconName", icon_name)
                     b.setIconSize(QSize(14, 14))
                     b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
                 except Exception:
@@ -943,12 +945,7 @@ class FileViewerPage(QWidget):
             Qt.TextInteractionFlag.TextSelectableByMouse
             | Qt.TextInteractionFlag.TextSelectableByKeyboard
         )
-        self.viewer.setStyleSheet(
-            "QPlainTextEdit {"
-            "  background:#0a0e14; color:#e6edf3; border:1px solid #252c36;"
-            "  border-radius:6px; padding:6px; selection-background-color:#1d6fe8;"
-            "}"
-        )
+        self.viewer.setObjectName("fileViewerEditor")
         mono = self.viewer.font()
         mono.setFamily("Consolas")
         mono.setStyleHint(mono.StyleHint.Monospace)
@@ -1066,38 +1063,8 @@ class RemoteFileBrowser(QWidget):
         self.tabs.tabCloseRequested.connect(self._close_tab)
         self.tabs.currentChanged.connect(lambda _: self._sync_title())
 
-        self.tabs.setStyleSheet("""
-            QTabWidget::pane {
-                border: none;
-                top: -1px;
-                background: transparent;
-            }
-            QTabBar::tab {
-                background: #121820;
-                color: #9aa6b5;
-                border: 1px solid #252c36;
-                border-bottom: none;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-                padding: 6px 12px 6px 10px;
-                margin-right: 2px;
-                min-height: 24px;
-            }
-            QTabBar::tab:selected {
-                background: #0a0e14;
-                color: #e8eef6;
-                border-color: #3b4656;
-            }
-            QTabBar::tab:hover:!selected { background: #1a222c; color: #dbe3ee; }
-            QTabBar::close-button {
-                subcontrol-position: right;
-                margin: 2px;
-            }
-            QTabBar::close-button:hover {
-                background: #3a1d22;
-                border-radius: 4px;
-            }
-        """)
+        self.tabs.setObjectName("fileBrowserTabs")
+
 
         # (+) in a dedicated column BESIDE the tab widget — never on top of tabs
         new_tab = QToolButton()
@@ -1106,16 +1073,11 @@ class RemoteFileBrowser(QWidget):
         new_tab.setCursor(Qt.CursorShape.PointingHandCursor)
         new_tab.setAutoRaise(True)
         new_tab.setFixedSize(26, 26)
-        new_tab.setStyleSheet(
-            "QToolButton#feNewTab {"
-            "  border: 1px solid #2a3340; border-radius: 6px; background: #161c24;"
-            "}"
-            "QToolButton#feNewTab:hover { background: #1c2430; border-color: #3b4656; }"
-            "QToolButton#feNewTab:pressed { background: #121820; }"
-        )
+        new_tab.setProperty("sshdockIconName", "fa5s.plus")
         try:
             import qtawesome as qta
-            new_tab.setIcon(qta.icon("fa5s.plus", color="#c5d0de"))
+            theme = str(QApplication.instance().property("sshdockTheme") or "dark").lower()
+            new_tab.setIcon(qta.icon("fa5s.plus", color="#475569" if theme == "light" else "#c5d0de"))
             new_tab.setIconSize(QSize(12, 12))
             new_tab.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
             new_tab.setText("")
@@ -1153,6 +1115,25 @@ class RemoteFileBrowser(QWidget):
         self.tabs.setCurrentWidget(pane)
         self._spawn(pane._refresh_async())
         return pane
+
+    def apply_theme(self, theme: str | None = None) -> None:
+        name = str(theme or QApplication.instance().property("sshdockTheme") or "dark").lower()
+        color = "#475569" if name == "light" else "#c5d0de"
+        if self._qta is not None:
+            for button in self.findChildren(QToolButton):
+                icon_name = button.property("sshdockIconName")
+                if icon_name:
+                    try:
+                        button.setIcon(self._qta.icon(str(icon_name), color=color))
+                    except Exception:
+                        pass
+        for i in range(self.tabs.count()):
+            widget = self.tabs.widget(i)
+            if hasattr(widget, "apply_theme"):
+                widget.apply_theme(name)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
 
     def _close_tab(self, index: int):
         widget = self.tabs.widget(index)
