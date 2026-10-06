@@ -1562,7 +1562,7 @@ class TerminalFileExplorer(QWidget):
         name = posixpath.basename(archive_path).lower()
         probe = (
             "name=" + shlex.quote(name) + "; "
-            "case "$name" in "
+            'case "$name" in '
             "*.zip) command -v 7z || command -v 7zz || command -v unzip ;; "
             "*.rar) command -v 7z || command -v 7zz || command -v unrar || command -v rar ;; "
             "*.7z|*.cab|*.iso|*.jar|*.war|*.ear|*.apk) command -v 7z || command -v 7zz ;; "
