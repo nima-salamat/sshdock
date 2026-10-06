@@ -4,6 +4,7 @@ from app.core.runtime import create_task
 from PySide6.QtCore import Qt, QTimer, QRectF
 from PySide6.QtGui import QColor, QPainter, QPen, QFont
 from PySide6.QtWidgets import QDialog, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QFrame, QComboBox, QPushButton, QScrollArea, QWidget
+from shiboken6 import isValid as is_qt_valid
 
 
 class GaugeWidget(QWidget):
@@ -14,6 +15,7 @@ class GaugeWidget(QWidget):
         self.value = 0.0
         self.setMinimumSize(160, 150)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
+        self.setObjectName("resourceGauge")
 
     def setValue(self, value: float):
         self.value = max(0.0, min(100.0, float(value)))
@@ -22,24 +24,25 @@ class GaugeWidget(QWidget):
     def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.fillRect(self.rect(), QColor("#111722"))
+        palette = self.palette()
+        p.fillRect(self.rect(), palette.color(palette.ColorRole.Base))
         cx = self.width() / 2
         cy = self.height() / 2 + 8
         radius = min(self.width(), self.height()) * 0.34
-        pen = QPen(QColor("#273247"), 11)
+        pen = QPen(palette.color(palette.ColorRole.Mid), 11)
         p.setPen(pen)
         p.setBrush(Qt.BrushStyle.NoBrush)
         rect = QRectF(cx - radius, cy - radius, radius * 2, radius * 2)
         p.drawArc(rect, 225 * 16, -270 * 16)
-        color = QColor("#32d583")
-        if self.value >= 85: color = QColor("#ff525e")
-        elif self.value >= 65: color = QColor("#ffb84d")
+        color = palette.color(palette.ColorRole.Highlight)
+        if self.value >= 85: color = palette.color(palette.ColorRole.BrightText)
+        elif self.value >= 65: color = palette.color(palette.ColorRole.Link)
         p.setPen(QPen(color, 11, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         p.drawArc(rect, 225 * 16, int(-270 * 16 * self.value / 100.0))
-        p.setPen(QColor("#f4f7fb"))
+        p.setPen(palette.color(palette.ColorRole.Text))
         f = QFont(); f.setPointSize(19); f.setBold(True); p.setFont(f)
         p.drawText(QRectF(0, cy - 16, self.width(), 35), Qt.AlignmentFlag.AlignCenter, f"{self.value:.0f}{self.suffix}")
-        f2 = QFont(); f2.setPointSize(9); f2.setBold(False); p.setFont(f2); p.setPen(QColor("#8e9bb2"))
+        f2 = QFont(); f2.setPointSize(9); f2.setBold(False); p.setFont(f2); p.setPen(palette.color(palette.ColorRole.PlaceholderText))
         p.drawText(QRectF(0, 12, self.width(), 22), Qt.AlignmentFlag.AlignCenter, self.title)
 
 
@@ -54,6 +57,8 @@ class ResourceMonitorDialog(QDialog):
         self._timer.timeout.connect(self.refresh)
         self._gauges: dict[int, GaugeWidget] = {}
         self._pending = False
+        self._closed = False
+        self._refresh_task = None
         self._build()
         self._set_interval("2 s")
         self.refresh()
@@ -61,12 +66,12 @@ class ResourceMonitorDialog(QDialog):
     def _build(self):
         root = QVBoxLayout(self); root.setContentsMargins(18,18,18,18); root.setSpacing(12)
         head = QHBoxLayout()
-        title = QLabel("Host Resource Monitor"); title.setStyleSheet("font-size:22px;font-weight:700;")
+        title = QLabel("Host Resource Monitor"); title.setObjectName("resourceTitle")
         head.addWidget(title); head.addStretch()
         self.interval = QComboBox(); self.interval.addItems(["Off","2 s","5 s","10 s"]); self.interval.setCurrentText("2 s")
         self.interval.currentTextChanged.connect(self._set_interval); head.addWidget(QLabel("Refresh")); head.addWidget(self.interval)
         refresh = QPushButton("↻ Refresh"); refresh.clicked.connect(self.refresh); head.addWidget(refresh)
-        self.status = QLabel("Ready"); self.status.setObjectName("resourceStatus"); self.status.setStyleSheet("color:#8e9bb2"); head.addWidget(self.status)
+        self.status = QLabel("Ready"); self.status.setObjectName("resourceStatus"); head.addWidget(self.status)
         close = QPushButton("Close"); close.clicked.connect(self.close); head.addWidget(close)
         root.addLayout(head)
 
@@ -76,11 +81,11 @@ class ResourceMonitorDialog(QDialog):
         self.swap = GaugeWidget("Swap")
         summary.addWidget(self.cpu, 1); summary.addWidget(self.memory, 1); summary.addWidget(self.swap, 1)
         self.load_lbl = QLabel("Load: —\nProcesses: —\nDisk: —\nUptime: —")
-        self.load_lbl.setStyleSheet("color:#b8c1d1;font-size:13px;padding:12px;")
+        self.load_lbl.setObjectName("resourceSummary")
         summary.addWidget(self.load_lbl, 1)
         root.addLayout(summary)
 
-        core_header = QHBoxLayout(); lbl=QLabel("CPU cores"); lbl.setStyleSheet("font-size:17px;font-weight:700;"); core_header.addWidget(lbl); core_header.addStretch(); self.core_meta=QLabel("— cores"); self.core_meta.setStyleSheet("color:#7f8da5"); core_header.addWidget(self.core_meta); root.addLayout(core_header)
+        core_header = QHBoxLayout(); lbl=QLabel("CPU cores"); lbl.setObjectName("resourceSectionTitle"); core_header.addWidget(lbl); core_header.addStretch(); self.core_meta=QLabel("— cores"); self.core_meta.setObjectName("resourceMeta"); core_header.addWidget(self.core_meta); root.addLayout(core_header)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.core_container = QWidget(); self.core_grid = QGridLayout(self.core_container); self.core_grid.setContentsMargins(0,0,0,0); self.core_grid.setSpacing(10)
         scroll.setWidget(self.core_container); root.addWidget(scroll, 1)
@@ -91,8 +96,12 @@ class ResourceMonitorDialog(QDialog):
         else: self._timer.start(seconds * 1000)
 
     async def _refresh_async(self):
+        if self._closed or not is_qt_valid(self):
+            return
         self.status.setText("Loading…")
         data = await self.monitor.detailed_snapshot()
+        if self._closed or not is_qt_valid(self):
+            return
         self.cpu.setValue(data.get("cpu_percent", 0))
         self.memory.setValue(data.get("memory_percent", 0))
         self.swap.setValue(data.get("swap_percent", 0))
@@ -119,14 +128,28 @@ class ResourceMonitorDialog(QDialog):
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        task = create_task(self._refresh_async())
+        task = create_task(self._refresh_async(), name="resource-monitor-refresh", owner="resource-monitor")
+        self._refresh_task = task
         def done(t):
             self._pending = False
+            if self._refresh_task is t:
+                self._refresh_task = None
+            if self._closed or not is_qt_valid(self):
+                return
             if not t.cancelled():
-                try: t.result()
-                except Exception as exc: self.findChild(QLabel, "resourceStatus").setText(str(exc)[:180]) if self.findChild(QLabel, "resourceStatus") else None
+                try:
+                    t.result()
+                except Exception as exc:
+                    status = self.findChild(QLabel, "resourceStatus")
+                    if status is not None and is_qt_valid(status):
+                        status.setText(str(exc)[:180])
         task.add_done_callback(done)
 
     def closeEvent(self, event):
+        self._closed = True
         self._timer.stop()
+        task = self._refresh_task
+        self._refresh_task = None
+        if task is not None and not task.done():
+            task.cancel()
         super().closeEvent(event)
