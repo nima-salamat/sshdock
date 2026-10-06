@@ -31,6 +31,7 @@ class NavButton(QFrame):
         self._text = text
         self._icon_name = icon_name
         self._shortcut_text = shortcut or ""
+        self._theme = "dark"
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(36)
         self.setToolTipDuration(800)
@@ -120,23 +121,30 @@ class NavButton(QFrame):
         except Exception:
             pass
 
+    def set_theme(self, theme: str) -> None:
+        self._theme = "light" if str(theme).lower() == "light" else "dark"
+        self._apply_style()
+
     def _apply_style(self):
         self._icon_lbl.setStyleSheet("background: transparent; border: 0;")
-        if self._checked:
-            self.setProperty("checked", True)
-            self._label.setStyleSheet("color:#e8f0ff; font-weight:600; background:transparent;")
-            self._shortcut.setStyleSheet(
-                "color:#8aa8d8; font-size:11px; font-family:'Segoe UI',monospace; background:transparent;"
-            )
-            self._accent.setStyleSheet("background:#3b82f6; border-radius:2px;")
-            self._paint_icon("#c7dbff")
+        light = self._theme == "light"
+        if light and self._checked:
+            label_color, shortcut_color, accent_color, icon_color = "#1e40af", "#64748b", "#3b82f6", "#2563eb"
+        elif light:
+            label_color, shortcut_color, accent_color, icon_color = "#334155", "#94a3b8", "transparent", "#64748b"
+        elif self._checked:
+            label_color, shortcut_color, accent_color, icon_color = "#e8f0ff", "#8aa8d8", "#3b82f6", "#c7dbff"
         else:
-            self.setProperty("checked", False)
-            self._label.setStyleSheet("color:#9ca7b5; font-weight:500; background:transparent;")
-            self._shortcut.setStyleSheet(
-                "color:#5c6775; font-size:11px; font-family:'Segoe UI',monospace; background:transparent;"
-            )
-            self._accent.setStyleSheet("background:transparent;")
-            self._paint_icon("#9aa6b5")
+            label_color, shortcut_color, accent_color, icon_color = "#9ca7b5", "#5c6775", "transparent", "#9aa6b5"
+
+        self.setProperty("checked", bool(self._checked))
+        self._label.setStyleSheet(
+            f"color:{label_color}; font-weight:{600 if self._checked else 500}; background:transparent;"
+        )
+        self._shortcut.setStyleSheet(
+            f"color:{shortcut_color}; font-size:11px; font-family:'Segoe UI',monospace; background:transparent;"
+        )
+        self._accent.setStyleSheet(f"background:{accent_color}; border-radius:2px;")
+        self._paint_icon(icon_color)
         self.style().unpolish(self)
         self.style().polish(self)
