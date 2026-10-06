@@ -274,3 +274,9 @@ def test_terminal_explorer_fixes_runtime_imports_used_by_media_and_transfer_feat
     assert "import asyncio" in src
     assert "import shutil" in src
     assert "import shlex" in src
+
+
+def test_terminal_webchannel_report_cwd_accepts_js_string_argument():
+    src = (ROOT / "app/terminal/web_widget.py").read_text(encoding="utf-8")
+    assert "    @Slot(str)\n    def report_cwd(self, path: str) -> None:" in src
+    assert "    @Slot()\n    def report_cwd(self, path: str) -> None:" not in src
