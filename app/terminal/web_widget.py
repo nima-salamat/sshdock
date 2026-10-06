@@ -47,7 +47,7 @@ class _Bridge(QObject):
         if cols > 0 and rows > 0:
             self.resize_received.emit(int(cols), int(rows))
 
-    @Slot()
+    @Slot(str)
     def report_cwd(self, path: str) -> None:
         if path:
             self.cwd_changed.emit(path)
