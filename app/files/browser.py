@@ -93,6 +93,11 @@ class ServerFileBackend:
             ))
         return entries
 
+    async def stat(self, path: str):
+        if self._sftp is None:
+            self._sftp = await self.ssh_getter().sftp()
+        return await self._sftp.stat(path)
+
     async def read_text(self, path: str, limit: int = 2 * 1024 * 1024) -> str:
         if self._sftp is None:
             self._sftp = await self.ssh_getter().sftp()
@@ -338,55 +343,8 @@ class FileBrowserPane(QWidget):
         root.setContentsMargins(6, 4, 6, 4)
         root.setSpacing(4)
 
-        self.setStyleSheet("""
-            QToolButton#feNav {
-                background: transparent;
-                border: none;
-                border-radius: 6px;
-                padding: 3px;
-                min-width: 26px;
-                min-height: 26px;
-            }
-            QToolButton#feNav:hover { background: #1c2430; }
-            QToolButton#feNav:pressed { background: #121820; }
-            QToolButton#feNav:checked { background: #1d6fe8; }
-            QLineEdit#fePath, QLineEdit#feSearch {
-                background: #0a0e14;
-                border: 1px solid #2a3340;
-                border-radius: 6px;
-                padding: 4px 8px;
-                color: #e8eef6;
-                min-height: 24px;
-            }
-            QLineEdit#fePath:focus, QLineEdit#feSearch:focus { border-color: #3b82f6; }
-            QTableWidget#feTable {
-                background: #0a0e14;
-                border: 1px solid #252c36;
-                border-radius: 8px;
-                gridline-color: transparent;
-                outline: 0;
-            }
-            QTableWidget#feTable::item { padding: 2px 6px; }
-            QTableWidget#feTable::item:selected { background: #1d6fe8; color: #fff; }
-            QHeaderView::section {
-                background: #10161e;
-                color: #7a8694;
-                border: none;
-                border-bottom: 1px solid #252c36;
-                padding: 4px 8px;
-                font-size: 11px;
-                font-weight: 600;
-            }
-            QToolButton#feAct {
-                background: transparent;
-                border: none;
-                border-radius: 6px;
-                padding: 4px 6px;
-                color: #c5d0de;
-            }
-            QToolButton#feAct:hover { background: #1c2430; }
-            QLabel#feStatus { color: #7a8694; font-size: 11px; }
-        """)
+        self.setObjectName("fileBrowserPane")
+
 
         def _icon_btn(tip: str, icon_name: str, fallback: str, *, checkable: bool = False) -> QToolButton:
             b = QToolButton()
@@ -397,7 +355,9 @@ class FileBrowserPane(QWidget):
             b.setCheckable(checkable)
             if qta:
                 try:
-                    b.setIcon(qta.icon(icon_name, color="#c5d0de"))
+                    theme = str(QApplication.instance().property("sshdockTheme") or "dark").lower()
+                    b.setIcon(qta.icon(icon_name, color="#475569" if theme == "light" else "#c5d0de"))
+                    b.setProperty("sshdockIconName", icon_name)
                     b.setIconSize(QSize(14, 14))
                     b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
                 except Exception:
@@ -457,7 +417,9 @@ class FileBrowserPane(QWidget):
             b.setAutoRaise(True)
             if qta:
                 try:
-                    b.setIcon(qta.icon(icon_name, color="#c5d0de"))
+                    theme = str(QApplication.instance().property("sshdockTheme") or "dark").lower()
+                    b.setIcon(qta.icon(icon_name, color="#475569" if theme == "light" else "#c5d0de"))
+                    b.setProperty("sshdockIconName", icon_name)
                     b.setIconSize(QSize(14, 14))
                     b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
                 except Exception:
@@ -530,6 +492,19 @@ class FileBrowserPane(QWidget):
 
         self._back_stack: list[str] = []
         self._forward_stack: list[str] = []
+
+    def apply_theme(self, theme: str | None = None) -> None:
+        name = str(theme or QApplication.instance().property("sshdockTheme") or "dark").lower()
+        for button in self.findChildren(QToolButton):
+            icon_name = button.property("sshdockIconName")
+            if self._qta is not None and icon_name:
+                try:
+                    button.setIcon(self._qta.icon(str(icon_name), color="#475569" if name == "light" else "#c5d0de"))
+                except Exception:
+                    pass
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
 
     def _set_path(self, path: str, push_history: bool = True):
         path = posixpath.normpath(path or "/")
