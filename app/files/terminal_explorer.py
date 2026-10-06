@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView, QHBoxLayout, QLabel, QLineEdit, QMenu, QPlainTextEdit,
-    QFileDialog,
+    QFileDialog, QApplication,
     QPushButton, QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
@@ -230,6 +230,8 @@ class TerminalFileExplorer(QWidget):
         root.addWidget(self.status)
 
         # Shared application stylesheet owns the explorer colors.
+
+    def _button(self, icon_name: str, tooltip: str, callback):
         b = QToolButton()
         b.setObjectName("feNav")
         b.setAutoRaise(True)
