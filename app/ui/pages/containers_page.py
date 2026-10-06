@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.docker.models import ContainerInfo
+from app.ui.widgets import AutoRefreshControl
 
 
 class ContainersPage(QWidget):
@@ -56,6 +57,8 @@ class ContainersPage(QWidget):
         self._open_inspect = open_inspect
         self._remove_one = remove_one
         self._rows: list[dict[str, Any]] = []
+        self._syncing_selection = False
+        self.auto_refresh = AutoRefreshControl(5)
         self._build(make_columns_resizable)
 
     def _build(self, make_columns_resizable: Callable | None) -> None:
@@ -68,6 +71,8 @@ class ContainersPage(QWidget):
         title.setObjectName("heroTitle")
         header.addWidget(title)
         header.addStretch()
+        header.addStretch()
+        header.addWidget(self.auto_refresh)
         refresh = QPushButton("Refresh")
         refresh.clicked.connect(self.refresh_requested.emit)
         header.addWidget(refresh)
@@ -126,8 +131,8 @@ class ContainersPage(QWidget):
             h.setMinimumSectionSize(40)
             self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             self.table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        self._syncing_selection = False
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
+        self.table.itemChanged.connect(self._on_check_changed)
         self.table.itemDoubleClicked.connect(lambda _: self.details_requested.emit())
         lay.addWidget(self.table, 1)
 
@@ -158,78 +163,68 @@ class ContainersPage(QWidget):
 
     def render(self, rows: list[dict[str, Any]] | None = None) -> None:
         rows = rows if rows is not None else self._rows
-        self.table.setRowCount(0)
+        preserve = set(self.checked_names())
         query = self.search.text().lower().strip()
         flt = self.filter.currentText()
-        for x in rows:
-            status = (x.get("Status") or "")
-            name = (x.get("Names") or x.get("Name") or "").lstrip("/")
-            state = x.get("State", "") or (status.split()[0] if status else "")
-            if "," in name:
-                name = name.split(",", 1)[0].strip()
-            image = x.get("Image", "") or ""
-            cid = str(x.get("ID") or "")
-            if query and query not in name.lower() and query not in image.lower() and query not in cid.lower():
-                continue
-            if flt == "Running" and state.lower() != "running":
-                continue
-            if flt == "Stopped" and state.lower() not in {"exited", "created", "dead"}:
-                continue
-            if flt == "Exited" and "exited" not in status.lower():
-                continue
-            if flt == "Restarting" and "restart" not in status.lower():
-                continue
-            if flt == "Unhealthy" and "unhealthy" not in status.lower():
-                continue
-            r = self.table.rowCount()
-            self.table.insertRow(r)
-            running = state.lower() == "running"
-            check = QCheckBox()
-            check.setAccessibleName(f"Select container {name}")
-            check.setToolTip(f"Select {name}")
-            check.setChecked(False)
-            check.setCursor(Qt.CursorShape.PointingHandCursor)
-            check.stateChanged.connect(lambda state, rr=r: self._on_checkbox_changed(rr, state))
-            check_host = QWidget()
-            check_host.setStyleSheet("background: transparent;")
-            check_lay = QHBoxLayout(check_host)
-            check_lay.setContentsMargins(0, 0, 0, 0)
-            check_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            check_lay.addWidget(check)
-            self.table.setCellWidget(r, 0, check_host)
-            status_text = "● RUN" if running else "○ STOP"
-            dot = QTableWidgetItem(status_text)
-            dot.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            dot.setForeground(QColor("#39d47a" if running else "#ff5260"))
-            f = dot.font()
-            f.setBold(True)
-            dot.setFont(f)
-            dot.setToolTip("Running · container is active" if running else "Stopped · container is not running")
-            self.table.setItem(r, 1, dot)
-            name_cell = QTableWidgetItem(name)
-            name_cell.setData(Qt.ItemDataRole.UserRole, cid)
-            self.table.setItem(r, 2, name_cell)
-            self.table.setItem(r, 3, QTableWidgetItem(image or "—"))
-            self.table.setItem(r, 4, QTableWidgetItem(x.get("Ports") or "—"))
-            self.table.setItem(r, 5, QTableWidgetItem(status or state or "—"))
-            if self._actions_cell and self._spawn_action:
-                entries = [
-                    (
-                        "Stop" if running else "Start",
-                        "fa5s.stop" if running else "fa5s.play",
-                        lambda _=False, n=name, rn=running: self._spawn_action("stop" if rn else "start", n),
-                    ),
-                    ("Restart", "fa5s.sync", lambda _=False, n=name: self._spawn_action("restart", n)),
-                    ("Logs", "fa5s.file-alt", lambda _=False, n=name: self._open_logs and self._open_logs(n)),
-                    ("Shell", "fa5s.terminal", lambda _=False, n=name: self._open_shell and self._open_shell(n)),
-                    ("Files", "fa5s.folder-open", lambda _=False, n=name: self._open_files and self._open_files(n)),
-                    ("Stats", "fa5s.chart-bar", lambda _=False, n=name: self._open_stats and self._open_stats(n)),
-                    ("Inspect", "fa5s.search", lambda _=False, n=name: self._open_inspect and self._open_inspect(n)),
-                    ("Remove", "fa5s.trash", lambda _=False, n=name: self._remove_one and self._remove_one(n)),
-                ]
-                self.table.setCellWidget(r, 6, self._actions_cell(entries, f"Actions for {name}"))
-            self.table.setRowHeight(r, 40)
-        self._emit_selection_count()
+        old_updates = self.table.updatesEnabled()
+        old_signals = self.table.blockSignals(True)
+        self.table.setUpdatesEnabled(False)
+        self.table.setSortingEnabled(False)
+        try:
+            self.table.setRowCount(0)
+            for x in rows:
+                status = (x.get("Status") or "")
+                name = (x.get("Names") or x.get("Name") or "").lstrip("/")
+                state = x.get("State", "") or (status.split()[0] if status else "")
+                if "," in name: name = name.split(",", 1)[0].strip()
+                image = x.get("Image", "") or ""
+                cid = str(x.get("ID") or "")
+                if query and query not in name.lower() and query not in image.lower() and query not in cid.lower(): continue
+                state_l = state.lower()
+                if flt == "Running" and state_l != "running": continue
+                if flt == "Stopped" and state_l not in {"exited", "created", "dead"}: continue
+                if flt == "Exited" and "exited" not in status.lower(): continue
+                if flt == "Restarting" and "restart" not in status.lower(): continue
+                if flt == "Unhealthy" and "unhealthy" not in status.lower(): continue
+                r = self.table.rowCount(); self.table.insertRow(r)
+                running = state_l == "running"
+                check = QTableWidgetItem("")
+                check.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                check.setCheckState(Qt.CheckState.Checked if (name in preserve or cid in preserve) else Qt.CheckState.Unchecked)
+                check.setData(Qt.ItemDataRole.UserRole, cid or name)
+                check.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                check.setToolTip(f"Select {name}")
+                self.table.setItem(r, 0, check)
+                status_text = "● RUN" if running else "○ STOP"
+                dot = QTableWidgetItem(status_text); dot.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                dot.setForeground(QColor("#39d47a" if running else "#ff5260"))
+                f = dot.font(); f.setBold(True); dot.setFont(f)
+                dot.setToolTip("Running · container is active" if running else "Stopped · container is not running")
+                self.table.setItem(r, 1, dot)
+                name_cell = QTableWidgetItem(name); name_cell.setData(Qt.ItemDataRole.UserRole, cid); self.table.setItem(r, 2, name_cell)
+                self.table.setItem(r, 3, QTableWidgetItem(image or "—"))
+                self.table.setItem(r, 4, QTableWidgetItem(x.get("Ports") or "—"))
+                self.table.setItem(r, 5, QTableWidgetItem(status or state or "—"))
+                if self._actions_cell and self._spawn_action:
+                    entries = [
+                        ("Stop" if running else "Start", "fa5s.stop" if running else "fa5s.play", lambda _=False, n=name, rn=running: self._spawn_action("stop" if rn else "start", n)),
+                        ("Restart", "fa5s.sync", lambda _=False, n=name: self._spawn_action("restart", n)),
+                        ("Logs", "fa5s.file-alt", lambda _=False, n=name: self._open_logs and self._open_logs(n)),
+                        ("Shell", "fa5s.terminal", lambda _=False, n=name: self._open_shell and self._open_shell(n)),
+                        ("Files", "fa5s.folder-open", lambda _=False, n=name: self._open_files and self._open_files(n)),
+                        ("Stats", "fa5s.chart-bar", lambda _=False, n=name: self._open_stats and self._open_stats(n)),
+                        ("Inspect", "fa5s.search", lambda _=False, n=name: self._open_inspect and self._open_inspect(n)),
+                        ("Remove", "fa5s.trash", lambda _=False, n=name: self._remove_one and self._remove_one(n)),
+                    ]
+                    self.table.setCellWidget(r, 6, self._actions_cell(entries, f"Actions for {name}"))
+                self.table.setRowHeight(r, 40)
+            self._emit_selection_count()
+        finally:
+            self.table.setSortingEnabled(False)
+            self.table.blockSignals(old_signals)
+            self.table.setUpdatesEnabled(old_updates)
+            self.table.viewport().update(); self.table.update()
+            self._emit_selection_count()
 
     def select_all_visible(self) -> None:
         self._syncing_selection = True
@@ -281,23 +276,24 @@ class ContainersPage(QWidget):
             self._syncing_selection = False
         self._emit_selection_count()
 
-    def _on_checkbox_changed(self, row: int, state: int) -> None:
-        if self._syncing_selection or row < 0 or row >= self.table.rowCount():
+    def _on_check_changed(self, item: QTableWidgetItem) -> None:
+        if self._syncing_selection or item is None or item.column() != 0:
             return
         self._syncing_selection = True
         try:
             from PySide6.QtCore import QItemSelectionModel
             sm = self.table.selectionModel()
-            index = self.table.model().index(row, 0)
-            flags = QItemSelectionModel.SelectionFlag.Rows | (
+            index = self.table.model().index(item.row(), 0)
+            flag = QItemSelectionModel.SelectionFlag.Rows | (
                 QItemSelectionModel.SelectionFlag.Select
-                if state == int(Qt.CheckState.Checked)
+                if item.checkState() == Qt.CheckState.Checked
                 else QItemSelectionModel.SelectionFlag.Deselect
             )
-            sm.select(index, flags)
+            sm.select(index, flag)
         finally:
             self._syncing_selection = False
         self._emit_selection_count()
+
 
     def _emit_selection_count(self) -> None:
         total = len(self.checked_names())
@@ -310,11 +306,11 @@ class ContainersPage(QWidget):
         for r in range(self.table.rowCount()):
             item = self.table.item(r, 0)
             name_item = self.table.item(r, 2)
-            name = ""
+            name = name_item.text().strip() if name_item else ""
             if item and item.data(Qt.ItemDataRole.UserRole):
-                name = str(item.data(Qt.ItemDataRole.UserRole))
-            elif name_item:
-                name = name_item.text().strip()
+                selected_key = str(item.data(Qt.ItemDataRole.UserRole))
+                if not name:
+                    name = selected_key
             if not name:
                 continue
             checked = item and item.checkState() == Qt.CheckState.Checked
