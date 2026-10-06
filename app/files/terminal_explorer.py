@@ -1486,6 +1486,7 @@ class TerminalFileExplorer(QWidget):
         menu = QMenu(self)
         if isinstance(data, Entry):
             open_action = menu.addAction("Open / Edit" if not data.is_dir else "Open folder")
+            extract_action = None
             if data.is_dir:
                 cd_action = menu.addAction("cd in terminal")
                 download_action = None
@@ -1562,10 +1563,10 @@ class TerminalFileExplorer(QWidget):
         probe = (
             "name=" + shlex.quote(name) + "; "
             "case "$name" in "
-            "*.zip|*.7z|*.rar|*.tar|*.tar.*|*.tgz|*.tbz|*.tbz2|*.txz|*.tzst|*.cab|*.iso|*.jar|*.war|*.ear|*.apk) "
-            "command -v 7z || command -v 7zz || "
-            "case "$name" in *.zip) command -v unzip ;; *.rar) command -v unrar || command -v rar ;; "
-            "*) command -v tar ;; esac ;; "
+            "*.zip) command -v 7z || command -v 7zz || command -v unzip ;; "
+            "*.rar) command -v 7z || command -v 7zz || command -v unrar || command -v rar ;; "
+            "*.7z|*.cab|*.iso|*.jar|*.war|*.ear|*.apk) command -v 7z || command -v 7zz ;; "
+            "*.tar|*.tar.*|*.tgz|*.tbz|*.tbz2|*.txz|*.tzst) command -v 7z || command -v 7zz || command -v tar ;; "
             "*.gz) command -v 7z || command -v 7zz || command -v gzip ;; "
             "*.bz2) command -v 7z || command -v 7zz || command -v bzip2 ;; "
             "*.xz) command -v 7z || command -v 7zz || command -v xz ;; "
@@ -1592,6 +1593,8 @@ class TerminalFileExplorer(QWidget):
             kind = "zstd"
         elif base == "lz4":
             kind = "lz4"
+        elif base == "xz":
+            kind = "xz"
         else:
             kind = "tar"
         return tool, kind
@@ -1656,6 +1659,7 @@ class TerminalFileExplorer(QWidget):
             f'elif [ "{kind}" = "bzip2" ]; then out="$dest/$(basename -- "$archive" .bz2)"; "$tool" -dc -- "$archive" > "$out"; '
             f'elif [ "{kind}" = "zstd" ]; then out="$dest/$(basename -- "$archive" .zst)"; "$tool" -dc -- "$archive" > "$out"; '
             f'elif [ "{kind}" = "lz4" ]; then out="$dest/$(basename -- "$archive" .lz4)"; "$tool" -dc -- "$archive" > "$out"; '
+            f'elif [ "{kind}" = "xz" ]; then out="$dest/$(basename -- "$archive" .xz)"; "$tool" -dc -- "$archive" > "$out"; '
             'else exit 2; fi; '
             'rc=$?; '
             'if [ "$rc" -eq 0 ]; then '
