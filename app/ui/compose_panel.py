@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 from app.docker.manager import DockerManager
 from app.storage.settings import SettingsStore
 from app.ui.notifications import NotificationBus
-from app.ui.widgets import icon_button
+from app.ui.widgets import icon_button, AutoRefreshControl, TableAutoRefresh
 from app.ui.job_tabs import MultiTabJobDialog
 
 try:
@@ -44,7 +44,23 @@ class ComposePanel:
         self.parent = parent
         self._compose_rows: list[dict[str, Any]] = []
         self._log_proc = None
+        self._auto_refresh = TableAutoRefresh(parent)
+        self._auto_refresh_control = AutoRefreshControl(5)
         self.page = self._build_page()
+        def refresh_tick():
+            return self.spawn(self.load())
+        self._auto_refresh.configure(
+            self._auto_refresh_control.seconds,
+            refresh_tick,
+            allowed=lambda: bool(self.get_server_id()) and self.page.isVisible(),
+        )
+        self._auto_refresh_control.intervalChanged.connect(
+            lambda seconds: self._auto_refresh.configure(
+                seconds,
+                refresh_tick,
+                allowed=lambda: bool(self.get_server_id()) and self.page.isVisible(),
+            )
+        )
 
     # ── UI construction ───────────────────────────────────────
     def _build_page(self) -> QWidget:
@@ -59,6 +75,7 @@ class ComposePanel:
         title.setObjectName("heroTitle")
         row.addWidget(title)
         row.addStretch()
+        row.addWidget(self._auto_refresh_control)
         add_btn = icon_button(
             "Add project", "fa5s.plus", self.add_project_dialog,
             "Register a compose file / project so it stays visible even when not running",
@@ -325,30 +342,53 @@ class ComposePanel:
                     "working_dir": reg.get("working_dir") or "",
                 }
         self._compose_rows = list(by_name.values())
-        self.table.setRowCount(0)
-        for x in self._compose_rows:
-            name = x.get("Name") or "—"
-            status = x.get("Status") or "—"
-            cfg = x.get("ConfigFiles") or "—"
-            rr = self.table.rowCount()
-            self.table.insertRow(rr)
-            chk = QTableWidgetItem("")
-            chk.setFlags(
-                Qt.ItemFlag.ItemIsUserCheckable
-                | Qt.ItemFlag.ItemIsEnabled
-                | Qt.ItemFlag.ItemIsSelectable
+        selected = {
+            str(
+                self.table.item(r, 1).data(Qt.ItemDataRole.UserRole)
+                or self.table.item(r, 1).text()
             )
-            chk.setCheckState(Qt.CheckState.Unchecked)
-            chk.setData(Qt.ItemDataRole.UserRole, name)
-            chk.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(rr, 0, chk)
-            nm = QTableWidgetItem(name)
-            nm.setData(Qt.ItemDataRole.UserRole, name)
-            self.table.setItem(rr, 1, nm)
-            self.table.setItem(rr, 2, QTableWidgetItem(str(status)))
-            self.table.setItem(rr, 3, QTableWidgetItem(str(cfg)))
-            self.table.setCellWidget(rr, 4, self._row_actions(name))
-            self.table.setRowHeight(rr, 40)
+            for r in range(self.table.rowCount())
+            if self.table.item(r, 1) is not None
+            and self.table.item(r, 0) is not None
+            and self.table.item(r, 0).checkState() == Qt.CheckState.Checked
+        }
+        old_updates = self.table.updatesEnabled()
+        old_signals = self.table.blockSignals(True)
+        self.table.setUpdatesEnabled(False)
+        self.table.setSortingEnabled(False)
+        try:
+            self.table.setRowCount(0)
+            for x in self._compose_rows:
+                name = x.get("Name") or "—"
+                status = x.get("Status") or "—"
+                cfg = x.get("ConfigFiles") or "—"
+                rr = self.table.rowCount()
+                self.table.insertRow(rr)
+                chk = QTableWidgetItem("")
+                chk.setFlags(
+                    Qt.ItemFlag.ItemIsUserCheckable
+                    | Qt.ItemFlag.ItemIsEnabled
+                    | Qt.ItemFlag.ItemIsSelectable
+                )
+                chk.setCheckState(
+                    Qt.CheckState.Checked if name in selected else Qt.CheckState.Unchecked
+                )
+                chk.setData(Qt.ItemDataRole.UserRole, name)
+                chk.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(rr, 0, chk)
+                nm = QTableWidgetItem(name)
+                nm.setData(Qt.ItemDataRole.UserRole, name)
+                self.table.setItem(rr, 1, nm)
+                self.table.setItem(rr, 2, QTableWidgetItem(str(status)))
+                self.table.setItem(rr, 3, QTableWidgetItem(str(cfg)))
+                self.table.setCellWidget(rr, 4, self._row_actions(name))
+                self.table.setRowHeight(rr, 40)
+        finally:
+            self.table.blockSignals(old_signals)
+            self.table.setSortingEnabled(False)
+            self.table.setUpdatesEnabled(old_updates)
+            self.table.viewport().update()
+            self.table.update()
         bin_note = f" (using {bin_cmd})" if bin_cmd else " (compose binary not found)"
         self.output.setPlainText(
             f"{len(self._compose_rows)} Compose project(s){bin_note}. "
