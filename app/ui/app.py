@@ -49,7 +49,11 @@ async def async_main(app: QApplication) -> None:
         profiles.append(profile)
         store.save_profiles(profiles)
 
-    manager = SessionManager(worker_shell_count=int(store.load_ui_prefs().get("worker_shell_count", 3)))
+    prefs = store.load_ui_prefs()
+    manager = SessionManager(
+        worker_shell_count=int(prefs.get("worker_shell_count", 3)),
+        remote_agent_enabled=bool(prefs.get("remote_agent_enabled", False)),
+    )
     window = MainWindow(manager, profiles, store)
     window._shutdown_event = asyncio.Event()
 
