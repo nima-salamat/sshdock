@@ -148,12 +148,24 @@ def test_terminal_explorer_has_unified_upload_and_creation_actions():
     assert 'self.upload_btn = self._button("fa5s.upload"' in src
     assert 'self.download_btn = self._button("fa5s.download"' in src
     assert "self.upload_folder_btn" not in src
-    assert 'self.count_label.setText(f"{visible} items · shell cwd")' in src
+    assert 'self.refresh_btn = self._button("fa5s.sync-alt", "Reload", self.refresh)' in src
+    assert 'self.status.setText(f"{visible} items · shell cwd")' in src
+    assert "self.count_label" not in src
     assert "async def new_folder(self):" in src
     assert "async def new_file(self):" in src
     assert "await self.backend.mkdir(path)" in src
     assert 'await self.backend.write_text(path, "")' in src
     assert "self._spawn(self._open_file(Entry(" in src
+def test_terminal_creation_is_serialized_and_titles_are_unique():
+    src = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
+    assert "self._terminal_creation_in_progress = False" in src
+    assert "if self._terminal_creation_in_progress:" in src
+    assert "self._terminal_creation_in_progress = True" in src
+    assert "self._terminal_creation_in_progress = False" in src
+    assert "def _unique_terminal_title(self, base_title: str) -> str:" in src
+    assert "return f"{base} {suffix}"" in src
+    assert 'and not getattr(self, "_terminal_creation_in_progress", False)' in src
+
 
 def test_terminal_explorer_uses_list_parent_and_collapsible_search():
     src = (ROOT / "app/files/terminal_explorer.py").read_text(encoding="utf-8")
