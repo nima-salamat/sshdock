@@ -68,6 +68,8 @@ QTabBar::tab:selected { background:#1d6fe8; color:#fff; }
 #emptyState { color:#788493; font-size:14px; }
 #terminalToolbar { background:#101419; border-bottom:1px solid #252b33; min-height:30px; }
 #terminalToolbar QToolButton, #terminalToolbar QPushButton { min-height:26px; max-height:28px; padding:2px 7px; border-radius:5px; }
+#terminalToolbar QPushButton#terminalPanelToggle:checked { background:#1d6fe8; border-color:#2e7cf0; color:#fff; }
+#terminalToolbar QPushButton#terminalPanelToggle:checked:hover { background:#2879ee; border-color:#3b82f6; }
 #terminalToolbarStatus { color:#93a1b1; font-size:11px; padding-left:6px; }
 #autoRefreshLabel { color:#93a1b1; font-size:11px; }
 QWidget#autoRefreshControl { background:transparent; }
@@ -252,6 +254,8 @@ QToolTip { padding:6px 8px; border:1px solid #d5dbe6; background:#ffffff; color:
 
 #terminalToolbar { background:#f1f5f9; border-bottom:1px solid #d5dbe6; min-height:30px; }
 #terminalToolbar QToolButton,#terminalToolbar QPushButton { min-height:26px; max-height:28px; padding:2px 7px; border-radius:5px; }
+#terminalToolbar QPushButton#terminalPanelToggle:checked { background:#2563eb; border-color:#3b82f6; color:#fff; }
+#terminalToolbar QPushButton#terminalPanelToggle:checked:hover { background:#3b82f6; border-color:#60a5fa; }
 #terminalToolbarStatus { color:#64748b; font-size:11px; padding-left:6px; }
 #autoRefreshLabel { color:#64748b; font-size:11px; }
 QWidget#autoRefreshControl { background:transparent; }
