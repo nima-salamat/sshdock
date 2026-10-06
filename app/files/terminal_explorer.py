@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import inspect
+import tempfile
+import time
 
 import os
 import posixpath
@@ -12,12 +14,125 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMenu, QPlainTextEdit, QFileDialog, QApplication,
     QInputDialog, QPushButton, QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem,
-    QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget, QProgressBar,
 )
 
 from app.files.browser import Entry, ServerFileBackend
 from app.files.highlighter import CodeHighlighter
 from app.files.file_types import classify, color_for
+
+try:
+    from PySide6.QtCore import QUrl
+    from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+    from PySide6.QtMultimediaWidgets import QVideoWidget
+    HAS_MEDIA = True
+except Exception:
+    QUrl = QAudioOutput = QMediaPlayer = QVideoWidget = None
+    HAS_MEDIA = False
+
+
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".ico"}
+VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".mpeg", ".mpg", ".ts", ".3gp"}
+
+
+class TransferCancelled(Exception):
+    pass
+
+
+def _human_size(value):
+    if value is None:
+        return "—"
+    value = float(value)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024 or unit == "TB":
+            return f"{value:,.0f} {unit}" if unit == "B" else f"{value:,.1f} {unit}"
+        value /= 1024
+    return "—"
+
+
+def _human_eta(seconds):
+    if seconds is None or seconds < 0:
+        return "—"
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, sec = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {sec:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes:02d}m"
+
+
+class _TransferDialog(QDialog):
+    def __init__(self, title, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(560, 190)
+        self.setModal(False)
+        self._cancel_callback = None
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 14, 14, 12)
+        root.setSpacing(8)
+
+        self.item_label = QLabel("Preparing…")
+        root.addWidget(self.item_label)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 100)
+        root.addWidget(self.progress)
+        self.stats = QLabel("0 B / 0 B · 0 B/s · ETA —")
+        root.addWidget(self.stats)
+        self.status = QLabel("")
+        root.addWidget(self.status)
+
+        row = QHBoxLayout()
+        row.addStretch()
+        self.cancel_btn = QPushButton("Cancel")
+        self.close_btn = QPushButton("Close")
+        self.close_btn.hide()
+        self.cancel_btn.clicked.connect(self._cancel)
+        self.close_btn.clicked.connect(self.close)
+        row.addWidget(self.cancel_btn)
+        row.addWidget(self.close_btn)
+        root.addLayout(row)
+
+    def set_cancel_callback(self, callback):
+        self._cancel_callback = callback
+
+    def _cancel(self):
+        self.cancel_btn.setEnabled(False)
+        self.status.setText("Cancelling…")
+        if callable(self._cancel_callback):
+            try:
+                self._cancel_callback()
+            except Exception:
+                pass
+
+    def update_transfer(self, label, done, total, rate, eta):
+        self.item_label.setText(label)
+        self.progress.setValue(int(done * 100 / total) if total else 0)
+        self.stats.setText(
+            f"{_human_size(done)} / {_human_size(total)} · "
+            f"{_human_size(rate)}/s · ETA {_human_eta(eta)}"
+        )
+
+    def completed(self, message):
+        self.progress.setValue(100)
+        self.status.setText(message)
+        self.cancel_btn.hide()
+        self.close_btn.show()
+
+    def cancelled(self):
+        self.status.setText("Transfer cancelled")
+        self.cancel_btn.hide()
+        self.close_btn.show()
+
+    def failed(self, message):
+        self.status.setText(message)
+        self.cancel_btn.hide()
+        self.close_btn.show()
+
+
 
 
 class _EditorWorkspace(QWidget):
