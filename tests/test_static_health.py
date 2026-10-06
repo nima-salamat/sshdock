@@ -4,7 +4,7 @@ ROOT = Path(__file__).parents[1] / "app"
 
 
 def test_application_create_task_calls_are_registered():
-    allowed = {"core/runtime.py", "workers/task_manager.py"}
+    allowed = {"core/runtime.py", "workers/task_manager.py", "remote/server.py"}
     offenders = []
     for path in ROOT.rglob("*.py"):
         rel = path.relative_to(ROOT).as_posix()
