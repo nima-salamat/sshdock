@@ -7,7 +7,7 @@ def test_terminal_explorer_is_dedicated_and_cwd_coupled():
     text = (ROOT / "app/files/terminal_explorer.py").read_text(encoding="utf-8")
     assert "class TerminalFileExplorer" in text
     assert "self.change_dir(data.path)" in text
-    assert "Current shell directory" in text
+    assert "terminalExplorerPathLabel" in text
     assert "itemExpanded.connect" in text
 
 
