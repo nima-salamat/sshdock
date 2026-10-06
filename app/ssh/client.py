@@ -17,6 +17,7 @@ from app.core.runtime import create_task
 from app.ssh.discovery import ssh_config_candidates
 from app.ssh.errors import classify_exception
 from app.storage.secure import CredentialStore
+from app.remote.agent import RemoteAgentClient
 
 log = logging.getLogger(__name__)
 
@@ -279,7 +280,7 @@ class _ShellWorker:
 
 
 class SSHServerConnection:
-    def __init__(self, profile, credentials, auth=None, worker_shell_count: int = 3):
+    def __init__(self, profile, credentials, auth=None, worker_shell_count: int = 3, remote_agent_enabled: bool = False):
         self.profile = profile
         self.credentials = credentials
         self.auth = auth or AuthMaterial()
@@ -301,10 +302,52 @@ class SSHServerConnection:
         self._processes: dict[int, Any] = {}
         self._process_seq = 0
         self._process_lock = asyncio.Lock()
+        self._remote_agent_enabled = bool(remote_agent_enabled)
+        self._remote_agent: RemoteAgentClient | None = None
 
     @property
     def is_connected(self):
         return self.connection is not None and not self.connection.is_closed()
+
+    @property
+    def remote_agent_enabled(self) -> bool:
+        return self._remote_agent_enabled
+
+    @property
+    def remote_agent_connected(self) -> bool:
+        return self._remote_agent is not None and self._remote_agent.connected
+
+    async def set_remote_agent_enabled(self, enabled: bool) -> None:
+        self._remote_agent_enabled = bool(enabled)
+        if not self._remote_agent_enabled:
+            await self._close_remote_agent()
+            return
+        if self.is_connected and self._remote_agent is None:
+            try:
+                await self._start_remote_agent()
+            except Exception as exc:
+                log.warning("Remote agent unavailable for %s: %s", self.profile.name, exc)
+
+    async def _start_remote_agent(self) -> None:
+        if not self._remote_agent_enabled or not self.is_connected or self._remote_agent is not None:
+            return
+        agent = RemoteAgentClient(self)
+        try:
+            await agent.start()
+        except Exception:
+            await agent.close()
+            raise
+        self._remote_agent = agent
+        log.info("Remote agent connected for %s", self.profile.name)
+
+    async def _close_remote_agent(self) -> None:
+        agent = self._remote_agent
+        self._remote_agent = None
+        if agent is not None:
+            try:
+                await agent.close()
+            except Exception:
+                log.debug("Remote agent cleanup failed for %s", self.profile.name, exc_info=True)
 
     @property
     def worker_shell_count(self) -> int:
@@ -468,6 +511,7 @@ class SSHServerConnection:
             self.credentials,
             self.auth,
             worker_shell_count=self._worker_shell_count,
+            remote_agent_enabled=False,
         )
         clone._host_key_cb = self._host_key_cb
         await clone.connect(host_key_cb=self._host_key_cb, with_worker_pool=False, with_command_transport=False if not with_command_transport else True)
@@ -515,6 +559,13 @@ class SSHServerConnection:
                     timeout=self.profile.connect_timeout + 2,
                 )
                 self.state = ConnectionState.CONNECTED
+                if with_command_transport and self._remote_agent_enabled:
+                    try:
+                        await self._start_remote_agent()
+                    except Exception as exc:
+                        # Acceleration is optional: hosts without Python 3 keep
+                        # working through the ordinary SSH execution paths.
+                        log.warning("Remote agent unavailable for %s: %s", self.profile.name, exc)
                 if with_worker_pool:
                     await self._start_worker_pool()
             except Exception as exc:
@@ -552,6 +603,19 @@ class SSHServerConnection:
     async def run(self, command, timeout=None):
         if not self.is_connected:
             raise RuntimeError("SSH connection is not established")
+        agent = self._remote_agent
+        if agent is not None and agent.connected:
+            try:
+                result = await agent.exec(command, timeout=timeout)
+                return CommandResult(
+                    command=command,
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                    exit_code=result.exit_code,
+                )
+            except Exception as exc:
+                log.warning("Remote agent command failed for %s; falling back to SSH: %s", self.profile.name, exc)
+                await self._close_remote_agent()
         if not self._workers:
             await self._start_worker_pool()
         return await self._run_with_worker(command, timeout)
@@ -567,6 +631,18 @@ class SSHServerConnection:
         return await self.run(command, timeout)
 
     async def run_fast(self, command, timeout=None):
+        if self._remote_agent is not None and self._remote_agent.connected:
+            try:
+                result = await self._remote_agent.exec(command, timeout=timeout)
+                return CommandResult(
+                    command=command,
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                    exit_code=result.exit_code,
+                )
+            except Exception as exc:
+                log.warning("Remote agent fast command failed for %s; falling back to SSH: %s", self.profile.name, exc)
+                await self._close_remote_agent()
         """Run a command via a fresh ``ssh.exec`` channel, bypassing the
         persistent worker shell pool.
 
@@ -705,6 +781,7 @@ class SSHServerConnection:
 
     async def close(self):
         self._close_requested = True
+        await self._close_remote_agent()
         for ch in tuple(self.channels):
             await self.close_channel(ch)
         await self._close_workers()
