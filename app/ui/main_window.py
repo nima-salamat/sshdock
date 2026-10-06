@@ -110,6 +110,9 @@ class MainWindow(QMainWindow):
         self._server_process_loading = False
         self._server_process_refresh_task: asyncio.Task | None = None
         self._terminal_files_visible = False
+        # Prevent concurrent terminal-creation coroutines from racing before
+        # SessionManager registers the newly opened session in self.terms.
+        self._terminal_creation_in_progress = False
         self.setWindowTitle("SSHDock — Docker over SSH")
         self.resize(1480, 930)
         self.setMinimumSize(QSize(960, 600))
@@ -2655,7 +2658,11 @@ class MainWindow(QMainWindow):
             self._refresh_terminal_selector()
             QTimer.singleShot(30, self._nudge_terminal_display)
             # Create first session only when the panel is opened and empty
-            if not self.terms and not getattr(self, "_auto_terminal_creation", False):
+            if (
+                not self.terms
+                and not getattr(self, "_auto_terminal_creation", False)
+                and not getattr(self, "_terminal_creation_in_progress", False)
+            ):
                 self._auto_terminal_creation = True
                 task = self._spawn(self._create_terminal())
                 if task is not None:
@@ -3591,13 +3598,34 @@ class MainWindow(QMainWindow):
             if sid in self.terminal_widgets and sid not in self.terms:
                 self._terminal_ui_closed(sid)
 
+    def _unique_terminal_title(self, base_title: str) -> str:
+        """Return a terminal title that is unique among current sessions."""
+        base = str(base_title or "Terminal").strip() or "Terminal"
+        used = {
+            str(session.title or "").strip().casefold()
+            for session in self.terms.values()
+            if str(session.title or "").strip()
+        }
+        if base.casefold() not in used:
+            return base
+        suffix = 2
+        while f"{base} {suffix}".casefold() in used:
+            suffix += 1
+        return f"{base} {suffix}"
+
     async def _create_terminal(self, title=None, command=None):
         if not self.current_id:
             return
-        server_id = self.current_id
-        title = title or f"Terminal {len(self.terms) + 1}"
+        # A fast double-click can otherwise schedule two coroutines before the
+        # first open_terminal() finishes and adds its session to self.terms.
+        if self._terminal_creation_in_progress:
+            return
+        self._terminal_creation_in_progress = True
+        try:
+            server_id = self.current_id
+            title = self._unique_terminal_title(title or f"Terminal {len(self.terms) + 1}")
 
-        page = QWidget()
+            page = QWidget()
         page_layout = QVBoxLayout(page)
         page_layout.setContentsMargins(0, 0, 0, 0)
         page_layout.setSpacing(0)
@@ -3680,6 +3708,8 @@ class MainWindow(QMainWindow):
             term.show_message(f"\n\x1b[31mSSH terminal failed to start:\x1b[0m {exc}\n")
             self.statusBar().showMessage(f"Terminal failed: {exc}", 10000)
             log.exception("Terminal creation failed")
+        finally:
+            self._terminal_creation_in_progress = False
 
     def _terminal_cwd_changed(self, sid: str, path: str):
         """Shell → explorer: keep session.cwd and live-sync the visible explorer."""
