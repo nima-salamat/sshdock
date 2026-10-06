@@ -51,3 +51,22 @@ def test_remote_agent_toggle_does_not_start_when_disconnected():
     connection._remote_agent_enabled = True
     assert connection.remote_agent_enabled is True
     assert connection.remote_agent_connected is False
+
+def test_terminal_bootstrap_does_not_write_setup_commands_to_pty():
+    from pathlib import Path
+    text = Path("app/terminal/session.py").read_text(encoding="utf-8")
+    start = text.index("    async def start(self):")
+    end = text.index("    def _extract_cwd", start)
+    body = text[start:end]
+    assert "self.channel.write(" not in body
+    assert "await asyncio.sleep(0.15)" not in body
+    assert "_prepare_shell_bootstrap" in body
+    assert "_write_bootstrap" in body
+
+
+def test_terminal_bootstrap_uses_non_pty_exec_and_controlled_bash_rc():
+    from pathlib import Path
+    text = Path("app/terminal/session.py").read_text(encoding="utf-8")
+    assert "self.ssh.start_command("cat > " + shlex.quote(path))" in text
+    assert "--noprofile --rcfile" in text
+    assert "DOCKER_PRETTY_SH" in text
