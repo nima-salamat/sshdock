@@ -767,6 +767,13 @@ class MainWindow(QMainWindow):
         vdes=QPushButton("Deselect"); vdes.clicked.connect(lambda: (self._deselect_table(self.volume_table), self.volume_selected.setText("0 selected"))); vb.addWidget(vdes); vb.addStretch()
         vrm=QPushButton("Remove selected"); vrm.setToolTip("Remove selected volumes"); vrm.clicked.connect(lambda: self._spawn(self._bulk_remove_volumes())); vb.addWidget(vrm)
         vpurge=QPushButton("Purge unused"); vpurge.setToolTip("docker volume prune -f"); vpurge.setProperty("danger", True); vpurge.clicked.connect(lambda: self._spawn(self._prune_resource("volume"))); vb.addWidget(vpurge)
+        self.volume_auto_refresh = self._register_table_auto_refresh(
+            "volumes",
+            vb,
+            self.load_volumes,
+            page_name="Storage",
+            allowed=lambda: bool(self.current_id) and self.pages.get("Storage") is self.stack.currentWidget() and tabs.currentWidget() is v,
+        )
         vref = QPushButton("↻ Refresh volumes")
         vref.clicked.connect(lambda: self._spawn(self.load_volumes()))
         vb.addWidget(vref)
@@ -777,6 +784,13 @@ class MainWindow(QMainWindow):
         ndes=QPushButton("Deselect"); ndes.clicked.connect(lambda: (self._deselect_table(self.network_table), self.network_selected.setText("0 selected"))); nb.addWidget(ndes); nb.addStretch()
         nrm=QPushButton("Remove selected"); nrm.setToolTip("Remove selected networks"); nrm.clicked.connect(lambda: self._spawn(self._bulk_remove_networks())); nb.addWidget(nrm)
         npurge=QPushButton("Purge unused"); npurge.setToolTip("docker network prune -f"); npurge.setProperty("danger", True); npurge.clicked.connect(lambda: self._spawn(self._prune_resource("network"))); nb.addWidget(npurge)
+        self.network_auto_refresh = self._register_table_auto_refresh(
+            "networks",
+            nb,
+            self.load_networks,
+            page_name="Storage",
+            allowed=lambda: bool(self.current_id) and self.pages.get("Storage") is self.stack.currentWidget() and tabs.currentWidget() is n,
+        )
         nref = QPushButton("↻ Refresh networks")
         nref.clicked.connect(lambda: self._spawn(self.load_networks()))
         nb.addWidget(nref)
@@ -1062,6 +1076,12 @@ class MainWindow(QMainWindow):
     def _server_page(self):
         page=QWidget(); lay=QVBoxLayout(page); page._layout_owner=lay; lay.setContentsMargins(24,20,24,24); lay.setSpacing(12)
         header=QHBoxLayout(); t=QLabel("Server"); t.setObjectName("heroTitle"); header.addWidget(t); header.addStretch()
+        self.server_auto_refresh = self._register_table_auto_refresh(
+            "server",
+            header,
+            self.refresh_server_page,
+            page_name="Server",
+        )
         refresh=QToolButton(); refresh.setText("Refresh"); refresh.setToolTip("Refresh server information"); refresh.clicked.connect(lambda _=False:self._spawn(self.refresh_server_page())); header.addWidget(refresh); lay.addLayout(header)
         self.server_tabs=QTabWidget()
         self.server_overview_table=QTableWidget(0,3); self.server_overview_table.setHorizontalHeaderLabels(["Metric","Value","Copy"]); self._prep_info_table(self.server_overview_table)
