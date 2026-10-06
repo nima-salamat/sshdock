@@ -240,3 +240,34 @@ def test_server_file_backend_exposes_sftp_progress_hooks_for_transfers():
     assert "async def download(self, path: str, local: str, progress_handler=None):" in src
     assert "async def upload(self, local: str, remote: str, progress_handler=None):" in src
     assert "progress_handler=progress_handler" in src
+
+
+def test_terminal_explorer_queue_rows_have_remove_buttons_and_file_type_icons():
+    src = (ROOT / "app/files/terminal_explorer.py").read_text(encoding="utf-8")
+    assert "class _QueueRowWidget(QWidget):" in src
+    assert 'remove_btn.setToolTip("Remove from list")' in src
+    assert 'remove_btn.setIcon(_queue_icon("fa5s.times"))' in src
+    assert "_remove_item" in src
+    assert '_queue_icon(ent.name, is_dir=ent.is_dir)' in src
+
+
+def test_terminal_explorer_supports_archive_extract_via_visible_terminal():
+    src = (ROOT / "app/files/terminal_explorer.py").read_text(encoding="utf-8")
+    window = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
+    types = (ROOT / "app/files/file_types.py").read_text(encoding="utf-8")
+    assert "class _ExtractDialog(QDialog):" in src
+    assert "async def extract_archive(self, ent: Entry):" in src
+    assert 'classify(data.name).key == "archive"' in src
+    assert "async def _detect_extractor" in src
+    assert "Extractor not installed" in src
+    assert 'run_command=self._run_terminal_explorer_command' in window
+    assert 'session.write(payload)' in window
+    assert '.tgz' in types and '.tbz2' in types and '.txz' in types
+    assert '.lz4' in types and '.lzma' in types
+
+
+def test_terminal_explorer_fixes_runtime_imports_used_by_media_and_transfer_features():
+    src = (ROOT / "app/files/terminal_explorer.py").read_text(encoding="utf-8")
+    assert "import asyncio" in src
+    assert "import shutil" in src
+    assert "import shlex" in src
