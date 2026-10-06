@@ -69,7 +69,7 @@ def test_terminal_bootstrap_preserves_user_shell_startup():
 def test_terminal_bootstrap_keeps_integration_on_the_live_shell():
     text = (Path(__file__).parents[1] / "app/terminal/session.py").read_text(encoding="utf-8")
     assert "async def _install_shell_integration(self):" in text
-    assert 'install_command(manage_echo=False)' in text
+    assert 'install_command(manage_echo=not echo_disabled)' in text
     assert "stty -echo 2>/dev/null" in text
     assert "self.ssh.start_command(" not in text
     assert "DOCKER_PRETTY_SH" not in text
