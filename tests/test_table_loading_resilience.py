@@ -273,29 +273,25 @@ def test_json_lines_logs_docker_errors():
 # Regression: ensure no loader clears table AFTER fetch anymore
 # --------------------------------------------------------------------------
 
-def test_no_loader_clears_table_after_fetch():
-    """No loader should have the pattern: await fetch(); table.setRowCount(0).
-
-    The table must be cleared BEFORE the fetch so stale data doesn't
-    persist on failure.
-    """
-    import re
-    # Look for patterns like: await ...dm.something()\n...setRowCount(0)
-    # This is a heuristic — we check that no await call is immediately
-    # followed by setRowCount(0) on the next logical line.
-    # The pattern we want to AVOID:
-    #   rows = await dm.images()
-    #   self.image_table.setRowCount(0)
-    bad_patterns = [
-        ('rows = await dm.images()', 'self.image_table.setRowCount(0)'),
-        ('rows=await dm.volumes()', 'self.volume_table.setRowCount(0)'),
-        ('rows=await dm.networks()', 'self.network_table.setRowCount(0)'),
+def test_live_table_loaders_swap_rows_only_after_fetch():
+    """Live tables keep the previous snapshot while network data is loading."""
+    expected = [
+        ("async def load_images", "rows = await dm.images()", "with self._atomic_table(self.image_table"),
+        ("async def load_volumes", "rows=await dm.volumes()", "with self._atomic_table(self.volume_table"),
+        ("async def load_networks", "rows=await dm.networks()", "with self._atomic_table(self.network_table"),
     ]
-    for fetch_line, clear_line in bad_patterns:
-        # The clear-before-fetch pattern has setRowCount BEFORE the await.
-        # The bad pattern has it AFTER. We just verify the good pattern
-        # exists (the bad pattern was already replaced).
-        assert clear_line in MAIN_WINDOW_SRC, f"Missing: {clear_line}"
+    for function_marker, fetch_line, render_marker in expected:
+        start = MAIN_WINDOW_SRC.index(function_marker)
+        end = MAIN_WINDOW_SRC.find("\n    async def ", start + len(function_marker))
+        end = len(MAIN_WINDOW_SRC) if end < 0 else end
+        body = MAIN_WINDOW_SRC[start:end]
+        assert fetch_line in body
+        assert render_marker in body
+        fetch_pos = body.index(fetch_line)
+        render_pos = body.index(render_marker)
+        assert render_pos > fetch_pos
+
+
 
 
 def test_worker_cancellation_disposes_persistent_shell():
