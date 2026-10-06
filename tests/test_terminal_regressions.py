@@ -68,3 +68,19 @@ def test_virtual_table_uses_xterm_marker_for_resize_reflow():
     assert "term.registerMarker(0)" in src
     assert "b._anchorMarker" in src
     assert "b._anchorMarker.dispose()" in src
+
+
+def test_terminal_scrollbar_uses_xterm_buffer_position():
+    src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    assert "activeScrollState()" in src
+    assert "normal ? normal.baseY" in src
+    assert "term.scrollToLine" in src
+    assert "scrollThumb.style.transform" in src
+
+
+def test_table_wheel_is_contained_without_breaking_native_scrollbars():
+    src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    assert "Never bubble them to xterm" in src
+    assert "ev.stopPropagation();" in src
+    assert "Native browser scrolling remains" in src
+    assert "passive:true" in src
