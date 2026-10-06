@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from app.docker.manager import DockerManager
 from app.files.highlighter import CodeHighlighter
 from app.files.file_types import classify, color_for
+from app.ui.widgets import AutoRefreshControl, TableAutoRefresh
 from app.ui.dialogs import ErrorDialog
 
 
@@ -330,7 +331,21 @@ class FileBrowserPane(QWidget):
         self.current_path = "/"
         self.entries: list[Entry] = []
         self.loading = False
+        self.auto_refresh = AutoRefreshControl(5)
+        self._auto_refresh = TableAutoRefresh(self)
         self._build()
+        self._auto_refresh.configure(
+            self.auto_refresh.seconds,
+            self.refresh,
+            allowed=lambda: self.isVisible() and not self.loading,
+        )
+        self.auto_refresh.intervalChanged.connect(
+            lambda seconds: self._auto_refresh.configure(
+                seconds,
+                self.refresh,
+                allowed=lambda: self.isVisible() and not self.loading,
+            )
+        )
 
     def _build(self):
         try:
@@ -401,6 +416,7 @@ class FileBrowserPane(QWidget):
         self.hidden_btn.setChecked(True)
         self.refresh_btn = _icon_btn("Refresh", "fa5s.sync-alt", "↻")
         bar.addWidget(self.hidden_btn)
+        bar.addWidget(self.auto_refresh)
         bar.addWidget(self.refresh_btn)
         root.addLayout(bar)
 
@@ -543,41 +559,50 @@ class FileBrowserPane(QWidget):
 
     def _render(self):
         query = self.search_edit.text().strip().lower()
+        old_updates = self.table.updatesEnabled()
+        old_signals = self.table.blockSignals(True)
+        old_sorting = self.table.isSortingEnabled()
+        self.table.setUpdatesEnabled(False)
         self.table.setSortingEnabled(False)
-        self.table.setRowCount(0)
-        qta = getattr(self, "_qta", None)
-        for ent in self.entries:
-            if query and query not in ent.name.lower():
-                continue
-            r = self.table.rowCount()
-            self.table.insertRow(r)
-            is_link = (ent.mode or "").startswith("link")
+        try:
+            self.table.setRowCount(0)
+            qta = getattr(self, "_qta", None)
             theme = str(QApplication.instance().property("sshdockTheme") or "dark").lower()
-            ft = classify(ent.name, is_dir=ent.is_dir, is_symlink=is_link)
-            kind = ("Folder" if ent.is_dir else "File") + (" link" if is_link else "")
-            icon_name = ft.icon
-            color = color_for(ft.key, theme)
-            name = QTableWidgetItem(ent.name)
-            name.setData(Qt.ItemDataRole.UserRole, ent)
-            name.setToolTip(ent.path)
-            if qta:
-                try:
-                    name.setIcon(qta.icon(icon_name, color=color))
-                except Exception:
-                    pass
-            self.table.setItem(r, 0, name)
-            kind_item = QTableWidgetItem(kind)
-            kind_item.setForeground(Qt.GlobalColor.gray)
-            self.table.setItem(r, 1, kind_item)
-            size_item = QTableWidgetItem("—" if ent.is_dir else _fmt_size(ent.size))
-            size_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.table.setItem(r, 2, size_item)
-            self.table.setItem(r, 3, QTableWidgetItem(_fmt_mtime(ent.mtime)))
-            mode_item = QTableWidgetItem(ent.mode or "—")
-            mode_item.setForeground(Qt.GlobalColor.gray)
-            self.table.setItem(r, 4, mode_item)
-        self.table.setSortingEnabled(True)
-        self._update_path_completer()
+            for ent in self.entries:
+                if query and query not in ent.name.lower():
+                    continue
+                r = self.table.rowCount()
+                self.table.insertRow(r)
+                is_link = (ent.mode or "").startswith("link")
+                ft = classify(ent.name, is_dir=ent.is_dir, is_symlink=is_link)
+                kind = ("Folder" if ent.is_dir else "File") + (" link" if is_link else "")
+                name = QTableWidgetItem(ent.name)
+                name.setData(Qt.ItemDataRole.UserRole, ent)
+                name.setToolTip(ent.path)
+                if qta:
+                    try:
+                        name.setIcon(qta.icon(ft.icon, color=color_for(ft.key, theme)))
+                    except Exception:
+                        pass
+                self.table.setItem(r, 0, name)
+                kind_item = QTableWidgetItem(kind)
+                kind_item.setForeground(Qt.GlobalColor.gray)
+                self.table.setItem(r, 1, kind_item)
+                size_item = QTableWidgetItem("—" if ent.is_dir else _fmt_size(ent.size))
+                size_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.table.setItem(r, 2, size_item)
+                self.table.setItem(r, 3, QTableWidgetItem(_fmt_mtime(ent.mtime)))
+                mode_item = QTableWidgetItem(ent.mode or "—")
+                mode_item.setForeground(Qt.GlobalColor.gray)
+                self.table.setItem(r, 4, mode_item)
+            self._update_path_completer()
+        finally:
+            self.table.blockSignals(old_signals)
+            self.table.setSortingEnabled(old_sorting)
+            self.table.setUpdatesEnabled(old_updates)
+            self.table.viewport().update()
+            self.table.update()
+
 
     def _update_path_completer(self):
         """Suggest current directory entries and full paths while typing in the address bar."""
