@@ -279,14 +279,16 @@ class TerminalFileExplorer(QWidget):
         title.setObjectName("terminalExplorerTitle")
         header.addWidget(title)
         header.addStretch()
-        # Search remains a toggle; creation actions live beside it.
+        # Search and reload stay together in the top action row.
         self.search_btn = self._button("fa5s.search", "Search files", self._toggle_search)
         self.search_btn.setCheckable(True)
         self.search_btn.setAutoRaise(True)
+        self.refresh_btn = self._button("fa5s.sync-alt", "Reload", self.refresh)
         self.new_folder_btn = self._button("fa5s.folder-plus", "New folder", self.new_folder)
         self.new_file_btn = self._button("fa5s.file", "New file", self.new_file)
         self.close_btn = self._button("fa5s.times", "Close explorer", self.closed_requested.emit)
         header.addWidget(self.search_btn)
+        header.addWidget(self.refresh_btn)
         header.addWidget(self.new_folder_btn)
         header.addWidget(self.new_file_btn)
         header.addWidget(self.close_btn)
@@ -302,17 +304,6 @@ class TerminalFileExplorer(QWidget):
             self.path_label.sizePolicy().verticalPolicy(),
         )
         path_row.addWidget(self.path_label, 1)
-
-        self.count_label = QLabel("")
-        self.count_label.setObjectName("terminalExplorerStatusInline")
-        path_row.addWidget(self.count_label)
-
-        self.refresh_btn = self._button("fa5s.sync-alt", "Refresh", self.refresh)
-        self.upload_btn = self._button("fa5s.upload", "Upload files and folders", self.upload_files)
-        self.download_btn = self._button("fa5s.download", "Download selected files/folders", self.download_selected)
-        path_row.addWidget(self.refresh_btn)
-        path_row.addWidget(self.upload_btn)
-        path_row.addWidget(self.download_btn)
         root.addLayout(path_row)
 
         self.search = QLineEdit()
@@ -338,9 +329,19 @@ class TerminalFileExplorer(QWidget):
         self.tree.customContextMenuRequested.connect(self._context_menu)
         root.addWidget(self.tree, 1)
 
+        footer = QHBoxLayout()
         self.status = QLabel("Waiting for shell directory…")
         self.status.setObjectName("terminalExplorerStatus")
-        root.addWidget(self.status)
+        footer.addWidget(self.status, 1)
+        self.upload_btn = self._button(
+            "fa5s.upload", "Upload files and folders", self.upload_files
+        )
+        self.download_btn = self._button(
+            "fa5s.download", "Download selected files/folders", self.download_selected
+        )
+        footer.addWidget(self.upload_btn)
+        footer.addWidget(self.download_btn)
+        root.addLayout(footer)
 
         # Shared application stylesheet owns the explorer colors.
 
@@ -520,7 +521,6 @@ class TerminalFileExplorer(QWidget):
         self._items_by_path.clear()
         self._loading_paths.clear()
         self.status.setText("Loading…")
-        self.count_label.setText("")
 
         # Use QTreeWidget's invisible root as the current-directory container.
         # Its children become the visible top-level filesystem entries.
@@ -598,7 +598,6 @@ class TerminalFileExplorer(QWidget):
                 visible += 1
             self._loaded_paths.add(path)
             if path == self.current_path:
-                self.count_label.setText(f"{visible} items · shell cwd")
                 self.status.setText(f"{visible} items · shell cwd")
             self._filter()
         except Exception as exc:
