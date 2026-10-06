@@ -265,60 +265,78 @@
         return scrollViewport;
       }
 
+      function activeScrollState() {
+        const active = term.buffer && term.buffer.active;
+        const alternate = !!active && active.type === 'alternate';
+        const normal = term.buffer && term.buffer.normal;
+        const rows = Math.max(1, term.rows || 1);
+        const maxLine = alternate ? 0 : Math.max(0, normal ? normal.baseY : (active ? active.baseY : 0));
+        const line = alternate ? 0 : Math.max(0, Math.min(maxLine, active ? active.viewportY : 0));
+        return { active, alternate, rows, maxLine, line };
+      }
+
       function syncScrollBar() {
-        const vp = getScrollViewport();
-        if (!scrollRail || !scrollThumb || !vp) return;
+        if (!scrollRail || !scrollThumb) return;
         const trackH = scrollRail.clientHeight;
-        const clientH = vp.clientHeight;
-        const scrollH = vp.scrollHeight;
-        if (trackH <= 0 || clientH <= 0 || scrollH <= clientH + 1) {
+        if (trackH <= 0) return;
+        const state = activeScrollState();
+
+        if (state.alternate || state.maxLine <= 0) {
+          // Keep the gutter structurally present, but hide the thumb while there
+          // is no scrollback. The terminal itself never loses this right-side
+          // hit target and no text can flow underneath it.
           scrollRail.hidden = true;
           return;
         }
+
         scrollRail.hidden = false;
-        const maxScroll = Math.max(1, scrollH - clientH);
-        const thumbH = Math.max(28, Math.round(trackH * clientH / scrollH));
+        const logicalLines = state.maxLine + state.rows;
+        const thumbH = Math.max(28, Math.min(trackH, Math.round(trackH * state.rows / logicalLines)));
         const travel = Math.max(0, trackH - thumbH);
-        const top = Math.round((vp.scrollTop / maxScroll) * travel);
+        const top = state.maxLine > 0 ? Math.round((state.line / state.maxLine) * travel) : 0;
         scrollThumb.style.height = thumbH + 'px';
-        scrollThumb.style.transform = 'translateY(' + top + 'px)';
+        scrollThumb.style.transform = 'translateY(' + top + 'px');
       }
 
-      function scrollViewportToRatio(ratio) {
-        const vp = getScrollViewport();
-        if (!vp) return;
-        const maxScroll = Math.max(0, vp.scrollHeight - vp.clientHeight);
-        vp.scrollTop = Math.max(0, Math.min(1, ratio)) * maxScroll;
+      function scrollToRatio(ratio) {
+        const state = activeScrollState();
+        if (state.alternate || state.maxLine <= 0) return;
+        const target = Math.round(Math.max(0, Math.min(1, ratio)) * state.maxLine);
+        try {
+          term.scrollToLine(target);
+        } catch (e) {
+          const vp = getScrollViewport();
+          if (vp) vp.scrollTop = (target / state.maxLine) * Math.max(0, vp.scrollHeight - vp.clientHeight);
+        }
         syncScrollBar();
       }
 
       function beginScrollDrag(ev) {
-        const vp = getScrollViewport();
-        if (!vp) return;
+        const state = activeScrollState();
+        if (!scrollRail || !scrollThumb || state.alternate || state.maxLine <= 0) return;
         ev.preventDefault();
         ev.stopPropagation();
         const railRect = scrollRail.getBoundingClientRect();
-        const thumbH = scrollThumb.offsetHeight;
-        const maxTop = Math.max(1, railRect.height - thumbH);
-        const thumbTop = scrollThumb.getBoundingClientRect().top - railRect.top;
+        const thumbRect = scrollThumb.getBoundingClientRect();
         scrollDrag = {
           startY: ev.clientY,
-          startTop: thumbTop,
-          maxTop: maxTop,
-          maxScroll: Math.max(0, vp.scrollHeight - vp.clientHeight),
+          startTop: thumbRect.top - railRect.top,
+          maxTop: Math.max(1, railRect.height - thumbRect.height),
+          maxLine: state.maxLine,
         };
         scrollThumb.classList.add('dragging');
       }
 
       function moveScrollDrag(ev) {
         if (!scrollDrag) return;
+        ev.preventDefault();
         const delta = ev.clientY - scrollDrag.startY;
         const top = Math.max(0, Math.min(scrollDrag.maxTop, scrollDrag.startTop + delta));
-        const vp = getScrollViewport();
-        if (vp) {
-          vp.scrollTop = (top / scrollDrag.maxTop) * scrollDrag.maxScroll;
-          syncScrollBar();
-        }
+        const ratio = top / scrollDrag.maxTop;
+        try {
+          term.scrollToLine(Math.round(ratio * scrollDrag.maxLine));
+        } catch (e) {}
+        syncScrollBar();
       }
 
       function endScrollDrag() {
@@ -334,14 +352,23 @@
         scrollRail.addEventListener('mousedown', function (ev) {
           if (ev.target === scrollThumb) return;
           const rect = scrollRail.getBoundingClientRect();
-          scrollViewportToRatio((ev.clientY - rect.top) / Math.max(1, rect.height));
+          scrollToRatio((ev.clientY - rect.top) / Math.max(1, rect.height));
         });
         scrollRail.addEventListener('wheel', function (ev) {
-          const vp = getScrollViewport();
-          if (!vp) return;
+          const state = activeScrollState();
+          if (state.alternate || state.maxLine <= 0) return;
           ev.preventDefault();
           ev.stopPropagation();
-          vp.scrollTop += ev.deltaY;
+          const ch = Math.max(1, (() => {
+            try {
+              return term._core._renderService.dimensions.css.cell.height || 16;
+            } catch (e) {
+              return 16;
+            }
+          })());
+          const lines = Math.max(1, Math.round(ev.deltaY / ch));
+          const target = Math.max(0, Math.min(state.maxLine, state.line + lines));
+          try { term.scrollToLine(target); } catch (e) {}
           syncScrollBar();
         }, {passive: false});
       }
@@ -513,6 +540,11 @@
             // ID column full width + drag-resize headers (all columns)
             const table = block.querySelector('table');
             if (table) {
+              block.addEventListener('wheel', function(ev){
+                if (!ev.target.closest('.body')) {
+                  ev.stopPropagation();
+                }
+              }, {passive:true});
               table.querySelectorAll('thead th').forEach(function(th, colIdx){
                 if (th.classList.contains('col-id')) {
                   let maxLen = (th.textContent||'').length;
@@ -555,12 +587,11 @@
                 // Table scroll stays on the table; shell keeps its own scrollbar.
                 // Only stopPropagation when the table body can still scroll in that direction.
                 bodyEl.addEventListener('wheel', function(ev){
-                  const el=bodyEl;
-                  const atTop = el.scrollTop <= 0 && ev.deltaY < 0;
-                  const atBot = el.scrollTop + el.clientHeight >= el.scrollHeight - 1 && ev.deltaY > 0;
-                  if (!atTop && !atBot) {
-                    ev.stopPropagation();
-                  }
+                  // The pointer is inside a virtual table: wheel events belong
+                  // to that table only. Never bubble them to xterm, even at the
+                  // table's top/bottom edge. Native browser scrolling remains
+                  // enabled, including horizontal scrolling and scrollbar behavior.
+                  ev.stopPropagation();
                 }, {passive:true});
               }
             }
