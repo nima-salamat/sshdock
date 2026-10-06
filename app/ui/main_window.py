@@ -1869,42 +1869,29 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _terminal_font_choices() -> list[str]:
-        """Curated console fonts plus monospace families installed on this machine."""
+        """Return a small, high-quality monospace list without scanning every Windows font."""
         preferred = [
-            "Cascadia Mono", "Cascadia Code", "JetBrains Mono", "Fira Code", "Fira Mono",
-            "Source Code Pro", "IBM Plex Mono", "Hack", "Consolas", "Courier New",
-            "Menlo", "Monaco", "DejaVu Sans Mono", "Liberation Mono", "Ubuntu Mono",
-            "Noto Sans Mono", "Roboto Mono", "Inconsolata", "SF Mono", "monospace",
+            "Cascadia Mono", "Cascadia Code", "JetBrains Mono", "Fira Code",
+            "Fira Mono", "Source Code Pro", "IBM Plex Mono", "Hack",
+            "Consolas", "Menlo", "Monaco", "DejaVu Sans Mono",
+            "Liberation Mono", "Ubuntu Mono", "Noto Sans Mono",
+            "Roboto Mono", "Inconsolata", "SF Mono", "monospace",
         ]
+        blocked = {"8514oem", "fixedsys", "terminal", "system", "ms sans serif"}
         try:
             from PySide6.QtGui import QFontDatabase
-            available = set(QFontDatabase.families())
+            available = {str(name) for name in QFontDatabase.families()}
         except Exception:
             available = set()
-        chosen: list[str] = []
-        seen: set[str] = set()
+
+        result: list[str] = []
         for name in preferred:
-            if name in seen:
+            if name.lower() in blocked:
                 continue
-            if not available or name in available or name == "monospace":
-                chosen.append(name)
-                seen.add(name)
-        for fam in sorted(available):
-            if fam in seen:
-                continue
-            try:
-                from PySide6.QtGui import QFontDatabase
-                if QFontDatabase.isFixedPitch(fam):
-                    chosen.append(fam)
-                    seen.add(fam)
-                    continue
-            except Exception:
-                pass
-            low = fam.lower()
-            if any(k in low for k in ("mono", "console", "courier", "code")):
-                chosen.append(fam)
-                seen.add(fam)
-        return chosen or ["Consolas", "monospace"]
+            if name == "monospace" or not available or name in available:
+                result.append(name)
+        return result or ["Consolas", "monospace"]
+
 
     def _apply_ui_prefs(self) -> None:
         prefs = self.store.load_ui_prefs()
