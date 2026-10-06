@@ -773,13 +773,9 @@ class SecureKeyPreviewDialog(QDialog):
                 self._banner.setText(
                     "✓ " + note + "  ·  Clipboard will auto-clear 30s after copy."
                 )
-                self._banner.setStyleSheet(
-                    "#secureBanner {"
-                    "  padding:8px 12px; border-radius:8px;"
-                    "  background:#0d2818; color:#41d17d;"
-                    "  border:1px solid #1d5a36; font-size:12px;"
-                    "}"
-                )
+                self._banner.setProperty("state", "success")
+                self._banner.style().unpolish(self._banner)
+                self._banner.style().polish(self._banner)
             else:
                 # Could not enforce OS-level protection — warn the user.
                 self._banner.setText(
