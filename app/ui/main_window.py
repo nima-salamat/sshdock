@@ -1367,6 +1367,23 @@ class MainWindow(QMainWindow):
         shell_row.addWidget(shell_hint, 1)
         ap.addLayout(shell_row)
 
+        self.remote_agent_cb = QCheckBox(
+            "Enable accelerated remote agent for background commands"
+        )
+        self.remote_agent_cb.setChecked(bool(prefs.get("remote_agent_enabled", False)))
+        self.remote_agent_cb.setToolTip(
+            "Uploads a temporary agent after SSH authentication. It listens only on "
+            "127.0.0.1 and is reached through an encrypted SSH tunnel."
+        )
+        ap.addWidget(self.remote_agent_cb)
+        agent_hint = QLabel(
+            "Uses a temporary loopback-only RPC agent to reduce per-command SSH "
+            "channel overhead. It is removed when the connection closes."
+        )
+        agent_hint.setObjectName("muted")
+        agent_hint.setWordWrap(True)
+        ap.addWidget(agent_hint)
+
         apply_btn = QPushButton("Apply appearance & SSH")
         apply_btn.setProperty("accent", True)
         apply_btn.clicked.connect(self._save_and_apply_ui_prefs)
@@ -1960,13 +1977,24 @@ class MainWindow(QMainWindow):
         prefs["notifications_enabled"] = self.notify_cb.isChecked()
         worker_count = int(self.worker_shell_count.value())
         prefs["worker_shell_count"] = worker_count
+        agent_enabled = self.remote_agent_cb.isChecked()
+        prefs["remote_agent_enabled"] = agent_enabled
         self.store.save_ui_prefs(prefs)
         # Apply the scheduler limit synchronously so page loaders immediately
         # use the new value; resize the persistent shell pool asynchronously.
         self.manager.set_worker_shell_count_limit(worker_count)
         self._spawn(self.manager.set_worker_shell_count(worker_count), name="Resize SSH worker pool")
+        self.manager.remote_agent_enabled = agent_enabled
+        self._spawn(
+            self.manager.set_remote_agent_enabled(agent_enabled),
+            name="Update remote agent",
+        )
         self._apply_ui_prefs()
-        self.statusBar().showMessage(f"SSH worker limit applied: {worker_count}", 3000)
+        self.statusBar().showMessage(
+            f"SSH worker limit applied: {worker_count}; "
+            f"remote agent {'enabled' if agent_enabled else 'disabled'}",
+            4000,
+        )
 
     def _export_settings_bundle(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
