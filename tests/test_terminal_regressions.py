@@ -76,6 +76,17 @@ def test_terminal_has_dedicated_scrollbar_gutter():
     assert "term._core.viewport.scrollBarWidth = 0" in src
 
 
+
+
+def test_magic_table_has_prompt_fallback_and_scrollbar_sync_without_tables():
+    src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    assert "const startAbs = Math.max(0, promptAbs - RESERVE);" in src
+    assert "b._anchorPromptAbs = promptAbs;" in src
+    assert "if (!term._sshdockScrollBarHook)" in src
+    assert "term.onWriteParsed(function(){ syncScrollBar(); })" in src
+    assert "term.onRender(function(){ syncScrollBar(); })" in src
+    assert "if (b._anchorMarker && markerLine < 0)" not in src
+    assert "const anchor = markerLine >= 0" in src
 def test_virtual_table_uses_xterm_marker_for_resize_reflow():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
     assert "term.registerMarker(0)" in src
