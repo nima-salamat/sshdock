@@ -175,7 +175,8 @@ class ConfirmRemoveDialog(QDialog):
             root.addWidget(listing)
         elif len(names) > 12:
             listing = QLabel("\n".join(f"• {n}" for n in names[:10]) + f"\n… and {len(names) - 10} more")
-            listing.setStyleSheet("color:#9ca7b5; font-size:12px;")
+            listing.setObjectName("muted")
+            listing.setStyleSheet("font-size:12px;")
             listing.setWordWrap(True)
             root.addWidget(listing)
 
@@ -1694,7 +1695,7 @@ class ConnectionDialog(QDialog):
         ic_new = self._icon("fa5s.plus-circle", "#74a7ff")
         ic_folder = self._icon("fa5s.folder", "#8a95a4")
         ic_folder_open = self._icon("fa5s.folder-open", "#74a7ff")
-        ic_ssh = self._icon("fa5s.terminal", "#9fb0c3")
+        ic_ssh = self._icon("fa5s.terminal")
         ic_saved = self._icon("fa5s.bookmark", "#74a7ff")
 
         new_item = QTreeWidgetItem(["＋  New connection"])
