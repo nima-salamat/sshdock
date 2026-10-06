@@ -39,3 +39,16 @@ def test_terminal_webengine_keeps_proven_first_commit_load_order():
     src = (ROOT / "app/terminal/web_widget.py").read_text(encoding="utf-8")
     assert "self._view.show()" in src
     assert "QTimer.singleShot(80, self._flush_pending)" in src
+
+
+def test_virtual_tables_follow_xterm_alternate_screen():
+    src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    assert "activeBuffer.type === 'alternate'" in src
+    assert "b.style.display = 'none';" in src
+    assert "term.buffer.onBufferChange" in src
+
+
+def test_terminal_close_has_no_obsolete_bootstrap_cleanup_path():
+    src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
+    assert "_cleanup_bootstrap" not in src
+    assert "_bootstrap_path" not in src
