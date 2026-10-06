@@ -1913,6 +1913,10 @@ class MainWindow(QMainWindow):
             for nav in self._nav_buttons.values():
                 if hasattr(nav, "set_theme"):
                     nav.set_theme(theme)
+            for widget in self.findChildren(QWidget):
+                apply_theme = getattr(widget, "apply_theme", None)
+                if callable(apply_theme):
+                    apply_theme(theme)
         except Exception:
             log.debug("Could not refresh theme icons", exc_info=True)
 
