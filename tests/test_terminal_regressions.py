@@ -71,10 +71,14 @@ def test_virtual_tables_follow_xterm_alternate_screen():
 def test_terminal_bootstrap_disables_echo_before_payload():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     docker = (ROOT / "app/terminal/docker_pretty.py").read_text(encoding="utf-8")
-    assert 'self.channel.write(b"stty -echo 2>/dev/null\\r")' in src
-    assert 'self.channel.write(b"printf \'\\r\\033[K\'\\r")' in src
+    assert 'stty -echo 2>/dev/null' in src
+    assert 'echo_disabled = True' in src
+    stty_pos = src.index('stty -echo 2>/dev/null')
+    setup_pos = src.index('self.channel.write((setup +')
+    payload_pos = src.index('install_command(manage_echo=False)')
+    assert stty_pos < setup_pos < payload_pos
     assert 'self.channel.write((setup + "\\r").encode("utf-8"))' in src
-    assert 'install_command(manage_echo=False) + "\\r"' in src
+    assert 'pretty = install_command(manage_echo=False) + "\\r"' in src
     assert "manage_echo: bool = True" in docker
     assert 'return command' in docker
 
@@ -145,8 +149,10 @@ def test_terminal_explorer_has_unified_upload_and_creation_actions():
     assert "self.selected_paths" in src
     assert 'self.new_folder_btn = self._button("fa5s.folder-plus"' in src
     assert 'self.new_file_btn = self._button("fa5s.file"' in src
-    assert 'self.upload_btn = self._button("fa5s.upload"' in src
-    assert 'self.download_btn = self._button("fa5s.download"' in src
+    assert 'self.upload_btn = self._button(' in src
+    assert '"fa5s.upload", "Upload files and folders"' in src
+    assert 'self.download_btn = self._button(' in src
+    assert '"fa5s.download", "Download selected files/folders"' in src
     assert "self.upload_folder_btn" not in src
     assert 'self.refresh_btn = self._button("fa5s.sync-alt", "Reload", self.refresh)' in src
     assert 'self.status.setText(f"{visible} items · shell cwd")' in src
