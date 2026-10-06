@@ -84,3 +84,13 @@ def test_table_wheel_is_contained_without_breaking_native_scrollbars():
     assert "ev.stopPropagation();" in src
     assert "Native browser scrolling remains" in src
     assert "passive:true" in src
+
+
+def test_process_sigint_uses_normal_graceful_shutdown_path():
+    src = (ROOT / "app/main.py").read_text(encoding="utf-8")
+    assert "import signal" in src
+    assert "signal.SIGINT" in src
+    assert "signal.SIGTERM" in src
+    assert "main_window.close()" in src
+    assert "widget.__class__.__name__ == "ConnectionDialog"" in src
+    assert "restore_signal_handlers()" in src
