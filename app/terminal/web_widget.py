@@ -52,6 +52,11 @@ class _Bridge(QObject):
         if path:
             self.cwd_changed.emit(path)
 
+    @Slot(str)
+    def report_magic(self, payload: str) -> None:
+        if payload:
+            self.magic_command.emit(payload)
+
     @Slot()
     def js_ready(self) -> None:
         self.page_ready.emit()
@@ -63,6 +68,7 @@ class XtermTerminalWidget(QWidget):
     input_bytes = Signal(bytes)
     resize_requested = Signal(int, int)
     cwd_changed = Signal(str)
+    magic_command = Signal(str)
 
     def __init__(self, parent=None, theme: str = "dark"):
         super().__init__(parent)
