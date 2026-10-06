@@ -207,9 +207,7 @@ class MainWindow(QMainWindow):
         self.server_picker.view().setTextElideMode(Qt.TextElideMode.ElideNone)
         self.server_picker.view().setMinimumWidth(260)
         # Popup list rows need room for descenders (g, p, y, …)
-        self.server_picker.view().setStyleSheet(
-            "QListView::item { min-height: 28px; padding: 4px 8px; }"
-        )
+        # Popup styling is inherited from the active application theme.
         self.server_picker.currentIndexChanged.connect(self._server_selected)
         tl.addWidget(self.server_picker)
         self.add_server_btn = icon_button("Add", "fa5s.plus", self.add_server, "Add / connect SSH server")
@@ -914,7 +912,8 @@ class MainWindow(QMainWindow):
         copy = QPushButton("Copy")
         if qta:
             try:
-                copy.setIcon(qta.icon("fa5s.copy", color="#dbe7f5"))
+                theme = str(QApplication.instance().property("sshdockTheme") or "dark").lower()
+                copy.setIcon(qta.icon("fa5s.copy", color="#475569" if theme == "light" else "#dbe7f5"))
             except Exception:
                 pass
         copy.clicked.connect(lambda: QApplication.clipboard().setText(view.toPlainText()))
@@ -1621,8 +1620,11 @@ class MainWindow(QMainWindow):
             self.disconnect_side.setToolTip("Disconnect from current server")
         try:
             if qta:
+                icon_name = "fa5s.angle-double-right" if collapsed else "fa5s.bars"
+                self.sidebar_toggle.setProperty("sshdockIconName", icon_name)
+                self.sidebar_toggle.setProperty("sshdockIconRole", "normal")
                 self.sidebar_toggle.setIcon(
-                    qta.icon("fa5s.angle-double-right" if collapsed else "fa5s.bars", color="#9aa6b5")
+                    qta.icon(icon_name, color=self._ui_icon_color("normal"))
                 )
         except Exception:
             pass
