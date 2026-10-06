@@ -163,7 +163,7 @@ def test_terminal_creation_is_serialized_and_titles_are_unique():
     assert "self._terminal_creation_in_progress = True" in src
     assert "self._terminal_creation_in_progress = False" in src
     assert "def _unique_terminal_title(self, base_title: str) -> str:" in src
-    assert "return f"{base} {suffix}"" in src
+    assert 'return f"{base} {suffix}"' in src
     assert 'and not getattr(self, "_terminal_creation_in_progress", False)' in src
 
 
