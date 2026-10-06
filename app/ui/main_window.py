@@ -1871,28 +1871,14 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _terminal_font_choices() -> list[str]:
-        """Return a small, high-quality monospace list without scanning every Windows font."""
-        preferred = [
+        """Return known-good terminal fonts without scanning legacy Windows bitmap fonts."""
+        return [
             "Cascadia Mono", "Cascadia Code", "JetBrains Mono", "Fira Code",
             "Fira Mono", "Source Code Pro", "IBM Plex Mono", "Hack",
             "Consolas", "Menlo", "Monaco", "DejaVu Sans Mono",
             "Liberation Mono", "Ubuntu Mono", "Noto Sans Mono",
             "Roboto Mono", "Inconsolata", "SF Mono", "monospace",
         ]
-        blocked = {"8514oem", "fixedsys", "terminal", "system", "ms sans serif"}
-        try:
-            from PySide6.QtGui import QFontDatabase
-            available = {str(name) for name in QFontDatabase.families()}
-        except Exception:
-            available = set()
-
-        result: list[str] = []
-        for name in preferred:
-            if name.lower() in blocked:
-                continue
-            if name == "monospace" or not available or name in available:
-                result.append(name)
-        return result or ["Consolas", "monospace"]
 
 
     def _apply_ui_prefs(self) -> None:
