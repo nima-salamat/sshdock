@@ -132,35 +132,34 @@ class ServerFileBackend:
             except OSError:
                 pass
 
-    async def download(self, path: str, local: str):
+    async def download(self, path: str, local: str, progress_handler=None):
         if self._sftp is None:
             self._sftp = await self.ssh_getter().sftp()
         sftp = self._sftp
         try:
             st = await sftp.stat(path)
             perms = int(getattr(st, "permissions", 0) or 0)
-            if stat.S_ISDIR(perms):
-                raise RuntimeError("Cannot download a directory with SFTP get. Open the folder or pick a file.")
-            if stat.S_ISLNK(perms):
-                # resolve symlink target type
-                try:
-                    st2 = await sftp.stat(path)  # asyncssh stat follows by default on some builds
-                    if stat.S_ISDIR(int(getattr(st2, "permissions", 0) or 0)):
-                        raise RuntimeError("This symlink points to a directory.")
-                except RuntimeError:
-                    raise
-                except Exception:
-                    pass
-        except RuntimeError:
-            raise
+            recurse = stat.S_ISDIR(perms)
         except Exception:
-            pass
-        await sftp.get(path, local)
+            recurse = False
+        await sftp.get(
+            path,
+            local,
+            recurse=recurse,
+            follow_symlinks=False,
+            progress_handler=progress_handler,
+        )
 
-    async def upload(self, local: str, remote: str):
+    async def upload(self, local: str, remote: str, progress_handler=None):
         if self._sftp is None:
             self._sftp = await self.ssh_getter().sftp()
-        await self._sftp.put(local, remote)
+        await self._sftp.put(
+            local,
+            remote,
+            recurse=os.path.isdir(local),
+            follow_symlinks=False,
+            progress_handler=progress_handler,
+        )
 
     async def mkdir(self, path: str):
         if self._sftp is None:
@@ -264,7 +263,7 @@ done'''
             raise RuntimeError(result.stderr.strip() or "Unable to allocate temporary file")
         return result.stdout.strip() + suffix
 
-    async def download(self, path: str, local: str):
+    async def download(self, path: str, local: str, progress_handler=None):
         if not os.path.basename(path):
             raise RuntimeError("Invalid container path")
         remote_tmp = f"/tmp/sshdock_dl_{os.getpid()}_{abs(hash(path))}"
@@ -283,7 +282,7 @@ done'''
             except Exception:
                 pass
 
-    async def upload(self, local: str, remote: str):
+    async def upload(self, local: str, remote: str, progress_handler=None):
         remote_tmp = f"/tmp/sshdock_ul_{os.getpid()}_{abs(hash(remote))}"
         try:
             await (await self.ssh.sftp()).put(local, remote_tmp)
