@@ -60,11 +60,14 @@ class RemoteAgentClient:
         self.remote_path=f"/tmp/sshdock-agent-{uuid.uuid4().hex[:16]}.py"
         try:
             await self._upload()
-            cmd=("if command -v python3 >/dev/null 2>&1; then exec python3 "
-                 +shlex.quote(self.remote_path)+
-                 " --port 0; elif command -v python >/dev/null 2>&1; then exec python "
-                 +shlex.quote(self.remote_path)+
-                 " --port 0; else printf '%s\\\\n' 'SSHDock remote agent requires Python 3'; exit 127; fi")
+            probe = await self.ssh.run_fast(
+                "command -v python3 || command -v python || true",
+                timeout=3,
+            )
+            python_bin = (probe.stdout or "").strip().splitlines()[0] if probe.stdout else ""
+            if not python_bin:
+                raise RuntimeError("SSHDock remote agent requires Python 3 on the server")
+            cmd = f"exec {shlex.quote(python_bin)} -u {shlex.quote(self.remote_path)} --port 0"
             self.process=await self.connection.create_process(cmd,encoding="utf-8",errors="replace")
             line=await asyncio.wait_for(self.process.stdout.readline(),4)
             if not line: raise RuntimeError("remote agent exited before handshake")
