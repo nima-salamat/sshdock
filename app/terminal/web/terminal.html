@@ -417,6 +417,22 @@
         if (term.parser && term.parser.registerOscHandler) term.parser.registerOscHandler(7, reportCwdFromOsc);
         else if (term.registerOscHandler) term.registerOscHandler(7, reportCwdFromOsc);
       } catch (e) {}
+
+      function reportMagicFromOsc(data) {
+        try {
+          const payload = String(data || '').trim();
+          if (payload && bridge && bridge.report_magic) {
+            bridge.report_magic(payload);
+          }
+          return true; // consume OSC 777 so it can never appear as terminal text
+        } catch (e) {
+          return true;
+        }
+      }
+      try {
+        if (term.parser && term.parser.registerOscHandler) term.parser.registerOscHandler(777, reportMagicFromOsc);
+        else if (term.registerOscHandler) term.registerOscHandler(777, reportMagicFromOsc);
+      } catch (e) {}
       let lastCols = 0, lastRows = 0;
       let fitTimer = null;
       let lastFindQuery = '';
