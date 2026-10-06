@@ -278,7 +278,7 @@ def test_live_table_loaders_swap_rows_only_after_fetch():
     expected = [
         ("async def load_images", "rows = await dm.images()", "with self._atomic_table(self.image_table"),
         ("async def load_volumes", "rows=await dm.volumes()", "with self._atomic_table(self.volume_table"),
-        ("async def load_networks", "rows=await dm.networks()", "with self._atomic_table(self.network_table"),
+        ("async def load_networks", "rows = await dm.networks()", "with self._atomic_table(self.network_table"),
     ]
     for function_marker, fetch_line, render_marker in expected:
         start = MAIN_WINDOW_SRC.index(function_marker)
