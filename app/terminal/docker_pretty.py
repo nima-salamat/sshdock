@@ -25,19 +25,9 @@ mdocker() {
 m-docker() { mdocker "$@"; }
 magic-docker() { mdocker "$@"; }
 
-# docker … --magic | --mdocker  → same as mdocker
-docker() {
-  if [ $# -lt 1 ]; then command docker; return; fi
-  local magic=0
-  local -a filtered=()
-  local a
-  for a in "$@"; do
-    if [ "$a" = "--magic" ] || [ "$a" = "--mdocker" ]; then magic=1
-    else filtered+=("$a"); fi
-  done
-  if [ "$magic" -eq 1 ]; then __sshdock_magic "${filtered[@]}"; return 0; fi
-  command docker "$@"
-}
+# Intentionally do not shadow the real docker command.
+# The native docker executable/function remains untouched so existing
+# user aliases, functions, and wrappers continue to work.
 
 # Long aliases (md*)
 alias mdps='mdocker ps'
