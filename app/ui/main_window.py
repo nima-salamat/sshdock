@@ -2900,9 +2900,15 @@ class MainWindow(QMainWindow):
         bl.addStretch()
         # Left-side panel toggles (explorer | session list) grouped together
         files_btn = self._action_button("", lambda _=False: self._toggle_terminal_files(), "fa5s.folder-open", "Explorer (side panel)")
+        files_btn.setObjectName("terminalPanelToggle")
+        files_btn.setCheckable(True)
+        files_btn.setChecked(False)
         bl.addWidget(files_btn)
         self.terminal_files_toggle = files_btn
         sessions_btn = self._action_button("", lambda _=False: self._toggle_terminal_sessions(), "fa5s.columns", "Session list (right strip)")
+        sessions_btn.setObjectName("terminalPanelToggle")
+        sessions_btn.setCheckable(True)
+        sessions_btn.setChecked(True)
         bl.addWidget(sessions_btn)
         self.terminal_sessions_toggle = sessions_btn
         bl.addSpacing(8)
@@ -3316,6 +3322,7 @@ class MainWindow(QMainWindow):
         if visible:
             self._refresh_explorer_cwd()
         if hasattr(self, "terminal_files_toggle") and self.terminal_files_toggle is not None:
+            self.terminal_files_toggle.setChecked(visible)
             self.terminal_files_toggle.setToolTip(
                 "Hide explorer" if visible else "Show explorer"
             )
@@ -3331,6 +3338,7 @@ class MainWindow(QMainWindow):
         self._apply_body_splitter_sizes(self._terminal_splitter_sizes(sessions=visible))
         btn = getattr(self, "terminal_sessions_toggle", None)
         if btn is not None:
+            btn.setChecked(visible)
             btn.setToolTip("Hide session list" if visible else "Show session list")
 
     def _on_terminal_body_splitter_moved(self, _pos: int = 0, _index: int = 0) -> None:
@@ -3348,12 +3356,14 @@ class MainWindow(QMainWindow):
             if self._terminal_files_visible:
                 self._terminal_files_visible = False
                 if hasattr(self, "terminal_files_toggle") and self.terminal_files_toggle is not None:
+                    self.terminal_files_toggle.setChecked(False)
                     self.terminal_files_toggle.setToolTip("Show explorer")
         else:
             was_closed = not self._terminal_files_visible
             self._terminal_files_visible = True
             self._saved_explorer_width = max(160, explorer_w)
             if hasattr(self, "terminal_files_toggle") and self.terminal_files_toggle is not None:
+                self.terminal_files_toggle.setChecked(True)
                 self.terminal_files_toggle.setToolTip("Hide explorer")
             # Dragging open: ensure browser exists and has content
             if was_closed:
@@ -3369,12 +3379,14 @@ class MainWindow(QMainWindow):
                 self._terminal_sessions_visible = False
                 btn = getattr(self, "terminal_sessions_toggle", None)
                 if btn is not None:
+                    btn.setChecked(False)
                     btn.setToolTip("Show session list")
         else:
             self._terminal_sessions_visible = True
             self._saved_sessions_width = max(72, sessions_w)
             btn = getattr(self, "terminal_sessions_toggle", None)
             if btn is not None:
+                btn.setChecked(True)
                 btn.setToolTip("Hide session list")
             self.terminal_sessions_list.show()
 
