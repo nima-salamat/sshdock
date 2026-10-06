@@ -295,7 +295,7 @@
         const travel = Math.max(0, trackH - thumbH);
         const top = state.maxLine > 0 ? Math.round((state.line / state.maxLine) * travel) : 0;
         scrollThumb.style.height = thumbH + 'px';
-        scrollThumb.style.transform = 'translateY(' + top + 'px');
+        scrollThumb.style.transform = 'translateY(' + top + 'px)';
       }
 
       function scrollToRatio(ratio) {
