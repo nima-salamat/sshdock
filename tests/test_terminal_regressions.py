@@ -25,7 +25,7 @@ def test_terminal_explorer_restores_button_factory():
     src = (ROOT / "app/files/terminal_explorer.py").read_text(encoding="utf-8")
     assert "QFileDialog, QApplication," in src
     assert "def _button(self, icon_name: str, tooltip: str, callback):" in src
-    assert "self.up_btn = self._button(" in src
+    assert "self.search_btn = self._button(" in src
 
 
 def test_terminal_webengine_fit_api_is_real_and_syncs_overlay():
@@ -67,7 +67,7 @@ def test_virtual_table_uses_xterm_marker_for_resize_reflow():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
     assert "term.registerMarker(0)" in src
     assert "b._anchorMarker" in src
-    assert "b._anchorMarker.dispose()" in src
+    assert "block._anchorMarker.dispose()" in src
 
 
 def test_terminal_scrollbar_uses_xterm_buffer_position():
@@ -90,7 +90,7 @@ def test_process_sigint_uses_normal_graceful_shutdown_path():
     src = (ROOT / "app/main.py").read_text(encoding="utf-8")
     assert "import signal" in src
     assert "signal.SIGINT" in src
-    assert "signal.SIGTERM" in src
+    assert 'getattr(signal, "SIGTERM", None)' in src
     assert "main_window.close()" in src
     assert 'widget.__class__.__name__ == "ConnectionDialog"' in src
     assert "restore_signal_handlers()" in src
