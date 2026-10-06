@@ -954,6 +954,21 @@ class FileViewerPage(QWidget):
         self.save_btn.clicked.connect(self._save)
         self.viewer.textChanged.connect(self._on_text_changed)
 
+    def apply_theme(self, theme: str | None = None) -> None:
+        name = str(theme or QApplication.instance().property("sshdockTheme") or "dark").lower()
+        color = "#475569" if name == "light" else "#c5d0de"
+        try:
+            import qtawesome as qta
+            for button in self.findChildren(QToolButton):
+                icon_name = button.property("sshdockIconName")
+                if icon_name:
+                    button.setIcon(qta.icon(str(icon_name), color=color))
+        except Exception:
+            pass
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
     def _update_meta(self, extra: str = "") -> None:
         lines = self.viewer.document().blockCount()
         chars = len(self.viewer.toPlainText())
