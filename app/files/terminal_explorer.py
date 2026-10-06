@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
+import shlex
+import shutil
 import tempfile
 import time
 
@@ -13,7 +16,7 @@ from PySide6.QtGui import QFont, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMenu, QPlainTextEdit, QFileDialog, QApplication,
-    QInputDialog, QPushButton, QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem,
+    QInputDialog, QMessageBox, QPushButton, QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget, QProgressBar,
 )
 
@@ -33,6 +36,56 @@ except Exception:
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".ico"}
 VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".mpeg", ".mpg", ".ts", ".3gp"}
+
+
+def _queue_icon(name: str, is_dir: bool = False) -> QIcon:
+    app = QApplication.instance()
+    theme = str(app.property("sshdockTheme") if app is not None else "dark").lower()
+    file_type = classify(name, is_dir=is_dir)
+    try:
+        import qtawesome as qta
+        return qta.icon(file_type.icon, color=color_for(file_type.key, theme))
+    except Exception:
+        return QIcon()
+
+
+class _QueueRowWidget(QWidget):
+    removed = Signal()
+
+    def __init__(self, name: str, path: str, icon: QIcon, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 5, 8, 5)
+        layout.setSpacing(8)
+
+        icon_label = QLabel()
+        icon_label.setFixedSize(20, 20)
+        try:
+            icon_label.setPixmap(icon.pixmap(QSize(18, 18)))
+        except Exception:
+            pass
+        layout.addWidget(icon_label)
+
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(0)
+        name_label = QLabel(name)
+        name_label.setObjectName("queueItemName")
+        path_label = QLabel(path)
+        path_label.setObjectName("queueItemPath")
+        path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        text_layout.addWidget(name_label)
+        text_layout.addWidget(path_label)
+        layout.addLayout(text_layout, 1)
+
+        remove_btn = QToolButton()
+        remove_btn.setAutoRaise(True)
+        remove_btn.setFixedSize(24, 24)
+        remove_btn.setToolTip("Remove from list")
+        remove_btn.setIcon(_queue_icon("fa5s.times"))
+        remove_btn.setIconSize(QSize(12, 12))
+        remove_btn.clicked.connect(self.removed.emit)
+        layout.addWidget(remove_btn)
 
 
 class TransferCancelled(Exception):
@@ -619,11 +672,8 @@ class _UploadSelectionDialog(QDialog):
         add_folder = QPushButton("Add folder")
         add_folder.setIcon(self._icon("fa5s.folder-open"))
         add_folder.clicked.connect(self._add_folder)
-        remove = QPushButton("Remove selected")
-        remove.clicked.connect(self._remove_selected)
         actions.addWidget(add_files)
         actions.addWidget(add_folder)
-        actions.addWidget(remove)
         actions.addStretch()
         root.addLayout(actions)
 
@@ -653,10 +703,19 @@ class _UploadSelectionDialog(QDialog):
             known.add(key)
             self.selected_paths.append(normalized)
             label = os.path.basename(os.path.normpath(normalized)) or normalized
-            item = QListWidgetItem(label)
+            item = QListWidgetItem()
             item.setToolTip(normalized)
             item.setData(Qt.ItemDataRole.UserRole, normalized)
             self.list.addItem(item)
+            row = _QueueRowWidget(
+                label,
+                normalized,
+                _queue_icon(label, is_dir=os.path.isdir(normalized)),
+                self.list,
+            )
+            item.setSizeHint(row.sizeHint())
+            row.removed.connect(lambda it=item: self._remove_item(it))
+            self.list.setItemWidget(item, row)
 
     def _add_files(self):
         files, _ = QFileDialog.getOpenFileNames(self, "Select files to upload")
@@ -667,9 +726,9 @@ class _UploadSelectionDialog(QDialog):
         if folder:
             self._add_paths([folder])
 
-    def _remove_selected(self):
-        for item in self.list.selectedItems():
-            row = self.list.row(item)
+    def _remove_item(self, item: QListWidgetItem):
+        row = self.list.row(item)
+        if row >= 0:
             self.list.takeItem(row)
         self.selected_paths = [
             self.list.item(i).data(Qt.ItemDataRole.UserRole)
@@ -686,15 +745,68 @@ class _UploadSelectionDialog(QDialog):
         self.accept()
 
 
+class _ExtractDialog(QDialog):
+    def __init__(self, archive_path: str, destination_name: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Extract archive")
+        self.resize(620, 210)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 14, 14, 12)
+        root.setSpacing(8)
+
+        archive_label = QLabel(f"Archive: {posixpath.basename(archive_path)}")
+        archive_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        root.addWidget(archive_label)
+
+        root.addWidget(QLabel("Extract into folder:"))
+        self.name_edit = QLineEdit(destination_name)
+        self.name_edit.setPlaceholderText("Folder name")
+        root.addWidget(self.name_edit)
+
+        root.addWidget(QLabel("Destination: current explorer directory"))
+
+        self.error = QLabel("")
+        root.addWidget(self.error)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Cancel
+            | QDialogButtonBox.StandardButton.Ok
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Extract")
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+    @property
+    def destination_name(self) -> str:
+        return self.name_edit.text().strip()
+
+    def _accept(self):
+        name = self.destination_name
+        if not TerminalFileExplorer._valid_child_name(name):
+            self.error.setText("Enter a valid folder name without '/' or '\\'.")
+            self.name_edit.setFocus()
+            return
+        self.accept()
+
+
 class TerminalFileExplorer(QWidget):
     """Compact remote filesystem explorer coupled to one interactive SSH shell."""
 
     closed_requested = Signal()
 
-    def __init__(self, backend: ServerFileBackend, change_dir: Callable[[str], None], parent=None):
+    def __init__(
+        self,
+        backend: ServerFileBackend,
+        change_dir: Callable[[str], None],
+        run_command: Callable[[str], object] | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.backend = backend
         self.change_dir = change_dir
+        self.run_command = run_command
         self.current_path = "/"
         self._loading_paths: set[str] = set()
         self._loaded_paths: set[str] = set()
@@ -1073,9 +1185,19 @@ class TerminalFileExplorer(QWidget):
         listing = QListWidget()
         for ent in entries:
             kind = "Folder" if ent.is_dir else "File"
-            row = QListWidgetItem(f"{kind}  ·  {ent.name}")
+            row = QListWidgetItem()
             row.setToolTip(ent.path)
+            row.setData(Qt.ItemDataRole.UserRole, ent)
             listing.addItem(row)
+            widget = _QueueRowWidget(
+                ent.name,
+                f"{kind} · {ent.path}",
+                _queue_icon(ent.name, is_dir=ent.is_dir),
+                listing,
+            )
+            row.setSizeHint(widget.sizeHint())
+            widget.removed.connect(lambda it=row: listing.takeItem(listing.row(it)))
+            listing.setItemWidget(row, widget)
         root.addWidget(listing, 1)
 
         warning = QLabel("This action is permanent and cannot be undone.")
@@ -1091,6 +1213,15 @@ class TerminalFileExplorer(QWidget):
         root.addWidget(buttons)
 
         if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        entries = [
+            listing.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(listing.count())
+        ]
+        entries = [ent for ent in entries if isinstance(ent, Entry)]
+        if not entries:
+            self.status.setText("Nothing to delete.")
             return
 
         deleted = 0
@@ -1361,6 +1492,11 @@ class TerminalFileExplorer(QWidget):
             else:
                 cd_action = None
                 download_action = menu.addAction("Download")
+                extract_action = (
+                    menu.addAction("Extract archive…")
+                    if classify(data.name).key == "archive"
+                    else None
+                )
             menu.addSeparator()
             copy_action = menu.addAction("Copy path")
             upload_action = menu.addAction("Upload files and folders here")
@@ -1374,6 +1510,8 @@ class TerminalFileExplorer(QWidget):
                 self.change_dir(data.path)
             elif download_action is not None and chosen is download_action:
                 self._spawn(self.download_one(data))
+            elif extract_action is not None and chosen is extract_action:
+                self._spawn(self.extract_archive(data))
             elif chosen is upload_action:
                 self._spawn(self.upload_files())
         elif isinstance(data, dict) and data.get("dir"):
@@ -1388,6 +1526,161 @@ class TerminalFileExplorer(QWidget):
                 QApplication.clipboard().setText(data["path"])
             elif chosen is upload_action:
                 self._spawn(self.upload_files())
+
+    @staticmethod
+    def _archive_default_dir(name: str) -> str:
+        lower = (name or "").lower()
+        for suffix in (
+            ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst", ".tar.lz4",
+            ".tgz", ".tbz", ".tbz2", ".txz", ".tzst",
+            ".zip", ".7z", ".rar", ".cab", ".iso", ".jar", ".war", ".ear", ".apk",
+            ".gz", ".bz2", ".xz", ".zst", ".lz4", ".lzma",
+        ):
+            if lower.endswith(suffix):
+                value = name[:-len(suffix)]
+                return value or "archive"
+        value = posixpath.splitext(name or "")[0]
+        return value or "archive"
+
+    async def _unique_extract_name(self, archive_name: str) -> str:
+        base = self._archive_default_dir(archive_name)
+        candidate = base
+        counter = 1
+        while True:
+            try:
+                await self.backend.stat(posixpath.join(self.current_path, candidate))
+            except Exception:
+                return candidate
+            candidate = f"{base}_{counter}"
+            counter += 1
+            if counter > 10000:
+                raise RuntimeError("Could not find a free extraction directory name")
+
+    async def _detect_extractor(self, archive_path: str) -> tuple[str, str] | None:
+        ssh = self.backend.ssh_getter()
+        name = posixpath.basename(archive_path).lower()
+        probe = (
+            "name=" + shlex.quote(name) + "; "
+            "case "$name" in "
+            "*.zip|*.7z|*.rar|*.tar|*.tar.*|*.tgz|*.tbz|*.tbz2|*.txz|*.tzst|*.cab|*.iso|*.jar|*.war|*.ear|*.apk) "
+            "command -v 7z || command -v 7zz || "
+            "case "$name" in *.zip) command -v unzip ;; *.rar) command -v unrar || command -v rar ;; "
+            "*) command -v tar ;; esac ;; "
+            "*.gz) command -v 7z || command -v 7zz || command -v gzip ;; "
+            "*.bz2) command -v 7z || command -v 7zz || command -v bzip2 ;; "
+            "*.xz) command -v 7z || command -v 7zz || command -v xz ;; "
+            "*.zst) command -v 7z || command -v 7zz || command -v zstd || command -v unzstd ;; "
+            "*.lz4) command -v 7z || command -v 7zz || command -v lz4 ;; "
+            "*.lzma) command -v 7z || command -v 7zz || command -v xz ;; "
+            "*) command -v 7z || command -v 7zz ;; esac"
+        )
+        result = await ssh.run(probe, timeout=8)
+        lines = (result.stdout or "").strip().splitlines()
+        tool = lines[-1].strip() if lines else ""
+        if not tool:
+            return None
+        base = posixpath.basename(tool)
+        if base in {"7z", "7zz"}:
+            kind = "7zip"
+        elif base == "unzip":
+            kind = "unzip"
+        elif base in {"unrar", "rar"}:
+            kind = "unrar"
+        elif base in {"gzip", "bzip2"}:
+            kind = base
+        elif base in {"zstd", "unzstd"}:
+            kind = "zstd"
+        elif base == "lz4":
+            kind = "lz4"
+        else:
+            kind = "tar"
+        return tool, kind
+
+    async def extract_archive(self, ent: Entry):
+        if ent.is_dir or classify(ent.name).key != "archive":
+            return
+
+        default_name = await self._unique_extract_name(ent.name)
+        dialog = _ExtractDialog(ent.path, default_name, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        destination_name = dialog.destination_name
+        destination = posixpath.join(self.current_path, destination_name)
+
+        try:
+            await self.backend.stat(destination)
+        except Exception:
+            pass
+        else:
+            self.status.setText(f"Destination already exists: {destination_name}")
+            return
+
+        try:
+            detected = await self._detect_extractor(ent.path)
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Extractor check failed",
+                f"Could not check archive tools: {str(exc)[:180]}",
+            )
+            return
+
+        if detected is None:
+            QMessageBox.warning(
+                self,
+                "Extractor not installed",
+                "No suitable extractor is installed on the server for this archive.\n\n"
+                "Install 7-Zip (7z/7zz), or the archive-specific tool such as unzip/unrar, "
+                "then run Extract again. The extraction itself is normally run in the visible terminal.",
+            )
+            self.status.setText("No suitable archive extractor is installed.")
+            return
+
+        tool, kind = detected
+        archive_q = shlex.quote(ent.path)
+        destination_q = shlex.quote(destination)
+        tool_q = shlex.quote(tool)
+        script = (
+            "set -u; "
+            f"archive={archive_q}; dest={destination_q}; tool={tool_q}; "
+            'printf "\n[SSHDock] Extracting: %s\\n" "$archive"; '
+            'printf "[SSHDock] Destination: %s\\n" "$dest"; '
+            'printf "[SSHDock] Extractor: %s\\n" "$tool"; '
+            'mkdir -p -- "$dest" || exit 1; '
+            f'if [ "{kind}" = "7zip" ]; then "$tool" x -y "-o$dest" -- "$archive"; '
+            f'elif [ "{kind}" = "unzip" ]; then "$tool" "$archive" -d "$dest"; '
+            f'elif [ "{kind}" = "unrar" ]; then "$tool" x -o+ "$archive" "$dest/"; '
+            f'elif [ "{kind}" = "tar" ]; then "$tool" -xf "$archive" -C "$dest"; '
+            f'elif [ "{kind}" = "gzip" ]; then out="$dest/$(basename -- "$archive" .gz)"; "$tool" -dc -- "$archive" > "$out"; '
+            f'elif [ "{kind}" = "bzip2" ]; then out="$dest/$(basename -- "$archive" .bz2)"; "$tool" -dc -- "$archive" > "$out"; '
+            f'elif [ "{kind}" = "zstd" ]; then out="$dest/$(basename -- "$archive" .zst)"; "$tool" -dc -- "$archive" > "$out"; '
+            f'elif [ "{kind}" = "lz4" ]; then out="$dest/$(basename -- "$archive" .lz4)"; "$tool" -dc -- "$archive" > "$out"; '
+            'else exit 2; fi; '
+            'rc=$?; '
+            'if [ "$rc" -eq 0 ]; then '
+            'printf "[SSHDock] Extract completed successfully: %s\\n" "$dest"; '
+            'else printf "[SSHDock] Extract failed with exit code %s\\n" "$rc"; fi'
+        )
+
+        if not callable(self.run_command):
+            QMessageBox.warning(
+                self,
+                "Terminal unavailable",
+                "The active SSH terminal is not available, so SSHDock cannot run the extraction command visibly.",
+            )
+            return
+
+        try:
+            result = self.run_command(f"sh -c {shlex.quote(script)}")
+            if inspect.isawaitable(result):
+                self._spawn(result)
+            self.status.setText(f"Extract command sent to terminal → {destination_name}")
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(1500, self.refresh)
+            QTimer.singleShot(5000, self.refresh)
+        except Exception as exc:
+            QMessageBox.warning(self, "Extract failed", str(exc)[:180])
 
     async def download_one(self, ent: Entry):
         target = QFileDialog.getSaveFileName(self, "Download file", ent.name)[0]
