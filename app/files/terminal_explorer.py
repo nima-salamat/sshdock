@@ -283,6 +283,9 @@ class _EditorWorkspace(QWidget):
         toolbar.addWidget(transfer_status)
         stop_download = QPushButton("Stop download")
         toolbar.addWidget(stop_download)
+        save_media_btn = QPushButton("Save As")
+        save_media_btn.setEnabled(False)
+        toolbar.addWidget(save_media_btn)
         lay.addLayout(toolbar)
 
         inner = QTabWidget()
@@ -357,7 +360,7 @@ class _EditorWorkspace(QWidget):
         record = {
             "widget": page, "view": source_view, "status": transfer_status,
             "task": None, "source_task": None, "cleanup": None, "player": player,
-            "temp": None, "stop": None,
+            "temp": None, "stop": None, "save_as": save_media_btn,
         }
         self._tabs[path] = record
 
@@ -439,6 +442,7 @@ class _EditorWorkspace(QWidget):
                         pass
                 transfer_status.setText("Ready")
                 preview_status.setText("Download complete")
+                save_media_btn.setEnabled(True)
                 stop_download.setText("Clear media")
                 try:
                     stop_download.clicked.disconnect()
@@ -450,6 +454,7 @@ class _EditorWorkspace(QWidget):
             except asyncio.CancelledError:
                 transfer_status.setText("Stopped")
                 preview_status.setText("Download stopped")
+                save_media_btn.setEnabled(False)
                 stop_download.setText("Clear media")
                 try:
                     stop_download.clicked.disconnect()
@@ -460,6 +465,7 @@ class _EditorWorkspace(QWidget):
             except Exception as exc:
                 transfer_status.setText("Failed")
                 preview_status.setText(f"Download failed: {str(exc)[:160]}")
+                save_media_btn.setEnabled(False)
                 stop_download.setText("Clear media")
                 try:
                     stop_download.clicked.disconnect()
@@ -503,6 +509,22 @@ class _EditorWorkspace(QWidget):
                 except OSError:
                     pass
 
+        def _save_media_as():
+            temp_path = record.get("temp")
+            if not temp_path or not os.path.exists(temp_path):
+                return
+            destination = QFileDialog.getSaveFileName(
+                self, "Save media", posixpath.basename(path)
+            )[0]
+            if not destination:
+                return
+            try:
+                shutil.copy2(temp_path, destination)
+                self.global_status.setText(f"Saved {os.path.basename(destination)}")
+            except Exception as exc:
+                self.global_status.setText(f"Save failed: {str(exc)[:140]}")
+
+        save_media_btn.clicked.connect(_save_media_as)
         record["cleanup"] = _cleanup
         self._media_source_loaders = getattr(self, "_media_source_loaders", {})
         self._media_source_loaders[path] = _source_loader
