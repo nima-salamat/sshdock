@@ -14,7 +14,7 @@ from PySide6.QtCore import Qt, QSize, QTimer, QPoint
 from PySide6.QtGui import QAction, QKeySequence, QColor, QFont, QCursor
 from PySide6.QtWidgets import (
     QScrollArea,
-    QAbstractItemView, QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QDialog, QFileDialog,
+    QAbstractItemView, QAbstractButton, QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QDialog, QFileDialog,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit,
     QPushButton, QSplitter, QStackedWidget, QTabWidget, QTableWidget, QTableWidgetItem, QMenu, QInputDialog,
     QToolButton, QVBoxLayout, QWidget, QHeaderView, QStyle, QProgressBar, QCheckBox, QSpinBox, QDialogButtonBox
@@ -227,11 +227,7 @@ class MainWindow(QMainWindow):
         self.main_splitter = QSplitter(Qt.Orientation.Vertical)
         self.main_splitter.setChildrenCollapsible(True)
         self.main_splitter.setHandleWidth(8)
-        self.main_splitter.setStyleSheet(
-            "QSplitter::handle:vertical { height: 8px; background: #252b33; }"
-            " QSplitter::handle:vertical:hover { background: #3b82f6; }"
-            " QSplitter::handle:vertical:pressed { background: #2563eb; }"
-        )
+        self.main_splitter.setObjectName("mainSplitter")
         self.main_splitter.setStretchFactor(0, 1)
         self.main_splitter.setStretchFactor(1, 0)
         self.main_splitter.splitterMoved.connect(self._on_terminal_splitter_moved)
@@ -257,9 +253,7 @@ class MainWindow(QMainWindow):
         fl.addWidget(self.terminal_toggle)
         self.terminal_shortcut_badge = QLabel("Ctrl+`")
         self.terminal_shortcut_badge.setObjectName("navShortcut")
-        self.terminal_shortcut_badge.setStyleSheet(
-            "color:#5c6775; font-size:11px; font-family: 'Segoe UI', monospace; padding:0 6px;"
-        )
+        self.terminal_shortcut_badge.setStyleSheet("")
         fl.addWidget(self.terminal_shortcut_badge)
         self.terminal_state = QLabel("No active terminal")
         self.terminal_state.setObjectName("muted")
@@ -569,24 +563,15 @@ class MainWindow(QMainWindow):
         summary.setSpacing(10)
         self.stats_card_containers = QLabel("0 containers")
         self.stats_card_containers.setObjectName("metricCard")
-        self.stats_card_containers.setStyleSheet(
-            "background:#151a21; border:1px solid #252c36; border-radius:10px;"
-            "padding:10px 14px; font-size:14px; font-weight:600; color:#f6f8fb;"
-        )
+        self.stats_card_containers.setProperty("statsCard", True)
         summary.addWidget(self.stats_card_containers)
         self.stats_card_cpu = QLabel("CPU: —")
         self.stats_card_cpu.setObjectName("metricCard")
-        self.stats_card_cpu.setStyleSheet(
-            "background:#151a21; border:1px solid #252c36; border-radius:10px;"
-            "padding:10px 14px; font-size:14px; font-weight:600; color:#f6f8fb;"
-        )
+        self.stats_card_cpu.setProperty("statsCard", True)
         summary.addWidget(self.stats_card_cpu)
         self.stats_card_mem = QLabel("Memory: —")
         self.stats_card_mem.setObjectName("metricCard")
-        self.stats_card_mem.setStyleSheet(
-            "background:#151a21; border:1px solid #252c36; border-radius:10px;"
-            "padding:10px 14px; font-size:14px; font-weight:600; color:#f6f8fb;"
-        )
+        self.stats_card_mem.setProperty("statsCard", True)
         summary.addWidget(self.stats_card_mem)
         summary.addStretch()
         lay.addLayout(summary)
@@ -619,7 +604,7 @@ class MainWindow(QMainWindow):
             "allocated cores. Hover any cell for the raw docker stats value."
         )
         hint.setWordWrap(True)
-        hint.setStyleSheet("color:#8a95a4; font-size:11px;")
+        hint.setObjectName("statsHint")
         lay.addWidget(hint)
 
         # Auto-refresh timer.
@@ -1927,9 +1912,23 @@ class MainWindow(QMainWindow):
         try:
             app = QApplication.instance()
             if app is not None:
+                app.setProperty("sshdockTheme", str(theme).lower())
                 app.setStyleSheet(theme_stylesheet(theme))
         except Exception:
             pass
+        # Rebuild theme-sensitive QtAwesome icons and navigation labels.
+        try:
+            for btn in self.findChildren(QAbstractButton):
+                icon_name = btn.property("sshdockIconName")
+                if qta is not None and icon_name:
+                    role = str(btn.property("sshdockIconRole") or "normal")
+                    btn.setIcon(qta.icon(str(icon_name), color=self._ui_icon_color(role, theme)))
+            for nav in self._nav_buttons.values():
+                if hasattr(nav, "set_theme"):
+                    nav.set_theme(theme)
+        except Exception:
+            log.debug("Could not refresh theme icons", exc_info=True)
+
         family = str(prefs.get("terminal_font_family") or "Consolas")
         size = int(prefs.get("terminal_font_size") or 13)
         font = QFont(family, size)
@@ -1968,6 +1967,14 @@ class MainWindow(QMainWindow):
                     w.setFont(font)
             except Exception:
                 pass
+
+    def _ui_icon_color(self, role: str = "normal", theme: str | None = None) -> str:
+        name = str(theme or self.store.load_ui_prefs().get("theme") or "dark").lower()
+        if role == "danger":
+            return "#b91c1c" if name == "light" else "#ff939b"
+        if role == "accent":
+            return "#ffffff"
+        return "#475569" if name == "light" else "#dbe7f5"
 
     def _save_and_apply_ui_prefs(self) -> None:
         prefs = self.store.load_ui_prefs()
@@ -2221,7 +2228,9 @@ class MainWindow(QMainWindow):
         b.setToolTip(tip)
         if qta:
             try:
-                b.setIcon(qta.icon("fa5s.ellipsis-h", color="#dce6f0"))
+                b.setProperty("sshdockIconName", "fa5s.ellipsis-h")
+                b.setProperty("sshdockIconRole", "normal")
+                b.setIcon(qta.icon("fa5s.ellipsis-h", color=self._ui_icon_color()))
             except Exception:
                 pass
         menu = QMenu(b)
@@ -2233,7 +2242,7 @@ class MainWindow(QMainWindow):
             act = menu.addAction(label)
             if qta and icon:
                 try:
-                    act.setIcon(qta.icon(icon, color="#dce6f0"))
+                    act.setIcon(qta.icon(icon, color=self._ui_icon_color()))
                 except Exception:
                     pass
             act.triggered.connect(cb)
@@ -2253,8 +2262,10 @@ class MainWindow(QMainWindow):
         b=QPushButton(); b.setObjectName("subtleAction"); b.setFixedSize(32,28); b.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         b.setToolTip(tooltip or text)
         b.setAccessibleName(text)
+        b.setProperty("sshdockIconName", icon_name)
+        b.setProperty("sshdockIconRole", "normal")
         if qta is not None:
-            try:b.setIcon(qta.icon(icon_name, color="#dbe7f5"))
+            try:b.setIcon(qta.icon(icon_name, color=self._ui_icon_color()))
             except Exception: pass
         else:
             b.setText(text[:1])
@@ -3943,7 +3954,10 @@ class MainWindow(QMainWindow):
         w=QWidget(); l=QHBoxLayout(w); l.setContentsMargins(4,2,4,2); l.setSpacing(4)
         menu_btn=QToolButton(); menu_btn.setObjectName("rowMenuButton"); menu_btn.setText("Actions"); menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup); menu_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon); menu_btn.setFixedHeight(26); menu_btn.setMinimumWidth(96); menu_btn.setMaximumWidth(120); menu_btn.setToolTip(f"Compose actions for {project}")
         if qta:
-            try: menu_btn.setIcon(qta.icon("fa5s.bars", color="#dce6f0"))
+            try:
+                menu_btn.setProperty("sshdockIconName", "fa5s.bars")
+                menu_btn.setProperty("sshdockIconRole", "normal")
+                menu_btn.setIcon(qta.icon("fa5s.bars", color=self._ui_icon_color()))
             except Exception: pass
         menu=QMenu(menu_btn)
         for label,action,icon in [
@@ -3955,7 +3969,11 @@ class MainWindow(QMainWindow):
             ("Pull","pull","fa5s.download"),
             ("Build","build","fa5s.hammer"),
         ]:
-            act=menu.addAction(qta.icon(icon) if qta else menu_btn.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton),label)
+            act=menu.addAction(
+                qta.icon(icon, color=self._ui_icon_color()) if qta
+                else menu_btn.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton),
+                label,
+            )
             act.triggered.connect(lambda _=False,a=action,p=project:self._spawn(self._compose_action_for_project(a,p)))
         menu.addSeparator()
         cp=menu.addAction("Copy project name"); cp.triggered.connect(lambda _=False,p=project:QApplication.clipboard().setText(p))
