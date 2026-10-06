@@ -9,7 +9,7 @@ import posixpath
 from typing import Callable
 
 from PySide6.QtCore import Qt, QSize, Signal
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtGui import QFont, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMenu, QPlainTextEdit, QFileDialog, QApplication,
@@ -717,12 +717,16 @@ class TerminalFileExplorer(QWidget):
         self.status = QLabel("Waiting for shell directory…")
         self.status.setObjectName("terminalExplorerStatus")
         footer.addWidget(self.status, 1)
+        self.delete_btn = self._button(
+            "fa5s.trash", "Delete selected files/folders", self.delete_selected
+        )
         self.upload_btn = self._button(
             "fa5s.upload", "Upload files and folders", self.upload_files
         )
         self.download_btn = self._button(
             "fa5s.download", "Download selected files/folders", self.download_selected
         )
+        footer.addWidget(self.delete_btn)
         footer.addWidget(self.upload_btn)
         footer.addWidget(self.download_btn)
         root.addLayout(footer)
@@ -776,6 +780,134 @@ class TerminalFileExplorer(QWidget):
         self.style().polish(self)
         self.update()
 
+    def _selected_entries(self) -> list[Entry]:
+        entries: list[Entry] = []
+        seen: set[str] = set()
+        for item in self.tree.selectedItems():
+            data = item.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(data, Entry):
+                key = data.path.rstrip("/") or "/"
+                if key not in seen:
+                    seen.add(key)
+                    entries.append(data)
+
+        # A selected directory owns its descendants. Do not delete/download a
+        # child separately when its parent directory is already selected.
+        entries.sort(key=lambda ent: (ent.path.count("/"), ent.path))
+        result: list[Entry] = []
+        selected_dirs: list[str] = []
+        for ent in entries:
+            if any(
+                ent.path == parent
+                or ent.path.startswith(parent.rstrip("/") + "/")
+                for parent in selected_dirs
+            ):
+                continue
+            result.append(ent)
+            if ent.is_dir:
+                selected_dirs.append(ent.path)
+        return result
+
+    def _make_transfer_dialog(self, title: str):
+        dialog = _TransferDialog(title, self)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        return dialog
+
+    def _upload_total_bytes(self, sources: list[str]) -> int:
+        total = 0
+        for source in sources:
+            try:
+                if os.path.isdir(source):
+                    for root, _dirs, files in os.walk(source):
+                        for name in files:
+                            try:
+                                total += os.path.getsize(os.path.join(root, name))
+                            except OSError:
+                                pass
+                else:
+                    total += os.path.getsize(source)
+            except OSError:
+                pass
+        return total
+
+    async def _run_transfer_batch(self, entries, dialog: _TransferDialog, *, upload: bool):
+        cancel_event = asyncio.Event()
+        total_bytes = self._upload_total_bytes([e.path for e in entries]) if upload else 0
+        if not upload:
+            total_bytes = sum(int(e.size or 0) for e in entries if not e.is_dir)
+
+        overall_done = 0
+        file_done: dict[str, int] = {}
+        started = time.monotonic()
+        current_task = asyncio.current_task()
+
+        def cancel():
+            cancel_event.set()
+            if current_task is not None and not current_task.done():
+                current_task.cancel()
+
+        dialog.set_cancel_callback(cancel)
+
+        def progress(src, _dst, done, total):
+            nonlocal overall_done
+            if cancel_event.is_set():
+                raise TransferCancelled("Transfer cancelled")
+            key = os.path.normcase(os.path.abspath(str(src)))
+            previous = file_done.get(key, 0)
+            overall_done += max(0, done - previous)
+            file_done[key] = done
+
+            now = time.monotonic()
+            elapsed = max(0.001, now - started)
+            rate = overall_done / elapsed
+            eta = (
+                (total_bytes - overall_done) / rate
+                if rate > 0 and total_bytes > overall_done
+                else None
+            )
+            label = os.path.basename(str(src)) or "transfer"
+            dialog.update_transfer(
+                ("Uploading " if upload else "Downloading ") + label,
+                overall_done,
+                total_bytes or total,
+                rate,
+                eta,
+            )
+
+        completed_items = 0
+        try:
+            for ent in entries:
+                if cancel_event.is_set():
+                    raise TransferCancelled("Transfer cancelled")
+                if upload:
+                    name = os.path.basename(os.path.normpath(ent.path))
+                    target = posixpath.join(self.current_path, name)
+                    await self.backend.upload(
+                        ent.path, target, progress_handler=progress
+                    )
+                else:
+                    target_dir = str(dialog.property("targetDir") or "")
+                    await self.backend.download(
+                        ent.path,
+                        os.path.join(target_dir, ent.name),
+                        progress_handler=progress,
+                    )
+                completed_items += 1
+
+            dialog.completed(
+                f"{'Uploaded' if upload else 'Downloaded'} "
+                f"{completed_items}/{len(entries)} item(s)"
+            )
+        except (TransferCancelled, asyncio.CancelledError):
+            dialog.cancelled()
+        except Exception as exc:
+            dialog.failed(f"Transfer failed: {str(exc)[:180]}")
+        finally:
+            if upload:
+                self._show_path()
+
     def _transfer_progress(self, direction: str, done: int, total: int):
         if total <= 0:
             self.status.setText(f"{direction}: {done:,} bytes")
@@ -790,25 +922,22 @@ class TerminalFileExplorer(QWidget):
         sources = list(chooser.selected_paths)
         if not sources:
             return
+        entries = [
+            Entry(
+                name=os.path.basename(os.path.normpath(local)),
+                path=local,
+                is_dir=os.path.isdir(local),
+            )
+            for local in sources
+        ]
 
-        ok = 0
-        for local in sources:
+        dialog = self._make_transfer_dialog("Upload")
+        async def _run():
             try:
-                name = os.path.basename(os.path.normpath(local))
-                await self.backend.upload(
-                    local,
-                    posixpath.join(self.current_path, name),
-                    progress_handler=lambda _src, _dst, done, total: self._transfer_progress(
-                        "Uploading", done, total
-                    ),
-                )
-                ok += 1
-            except Exception as exc:
-                self.status.setText(f"Upload failed: {str(exc)[:140]}")
-                break
-
-        self.status.setText(f"Uploaded {ok}/{len(sources)} item(s) to {self.current_path}")
-        self._show_path()
+                await self._run_transfer_batch(entries, dialog, upload=True)
+            except asyncio.CancelledError:
+                pass
+        self._spawn(_run())
 
     async def new_folder(self):
         name, ok = QInputDialog.getText(self, "New folder", "Folder name:")
@@ -860,31 +989,76 @@ class TerminalFileExplorer(QWidget):
         return bool(name) and name not in (".", "..") and "/" not in name and "\\" not in name
 
     async def download_selected(self):
-        items = self.tree.selectedItems()
-        entries = []
-        for item in items:
-            data = item.data(0, Qt.ItemDataRole.UserRole)
-            if isinstance(data, Entry):
-                entries.append(data)
+        entries = self._selected_entries()
         if not entries:
             self.status.setText("Select one or more files/folders to download.")
             return
         target = QFileDialog.getExistingDirectory(self, "Download to")
         if not target:
             return
-        ok = 0
+
+        dialog = self._make_transfer_dialog("Download")
+        dialog.setProperty("targetDir", target)
+        async def _run():
+            try:
+                await self._run_transfer_batch(entries, dialog, upload=False)
+            except asyncio.CancelledError:
+                pass
+        self._spawn(_run())
+
+    async def delete_selected(self):
+        entries = self._selected_entries()
+        if not entries:
+            self.status.setText("Select one or more files/folders to delete.")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Delete selected items")
+        dialog.resize(560, 420)
+        root = QVBoxLayout(dialog)
+        root.setContentsMargins(14, 14, 14, 12)
+        root.setSpacing(8)
+
+        root.addWidget(QLabel("Delete these selected items?"))
+        listing = QListWidget()
+        for ent in entries:
+            kind = "Folder" if ent.is_dir else "File"
+            row = QListWidgetItem(f"{kind}  ·  {ent.name}")
+            row.setToolTip(ent.path)
+            listing.addItem(row)
+        root.addWidget(listing, 1)
+
+        warning = QLabel("This action is permanent and cannot be undone.")
+        root.addWidget(warning)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Cancel
+            | QDialogButtonBox.StandardButton.Yes
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Yes).setText("Delete")
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        root.addWidget(buttons)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        deleted = 0
+        failed = []
         for ent in entries:
             try:
-                await self.backend.download(
-                    ent.path,
-                    os.path.join(target, ent.name),
-                    progress_handler=lambda _src, _dst, done, total: self._transfer_progress("Downloading", done, total),
-                )
-                ok += 1
+                await self.backend.delete(ent.path, ent.is_dir)
+                deleted += 1
             except Exception as exc:
-                self.status.setText(f"Download failed: {str(exc)[:140]}")
-                break
-        self.status.setText(f"Downloaded {ok}/{len(entries)} item(s) to {target}")
+                failed.append(f"{ent.name}: {exc}")
+
+        self._show_path()
+        if failed:
+            self.status.setText(
+                f"Deleted {deleted}/{len(entries)} item(s); {len(failed)} failed"
+            )
+        else:
+            self.status.setText(f"Deleted {deleted} item(s)")
 
     def _normalize(self, path: str) -> str:
         path = posixpath.normpath(path or "/")
@@ -1096,6 +1270,14 @@ class TerminalFileExplorer(QWidget):
     async def _open_file(self, ent: Entry):
         self.status.setText(f"Opening {ent.name}…")
         try:
+            ext = posixpath.splitext(ent.name.lower())[1]
+            if ext in IMAGE_EXTS or ext in VIDEO_EXTS:
+                if self._editor is None:
+                    self._editor = _EditorWorkspace(self.backend, parent=None)
+                self._editor.open_media(ent.path, is_video=ext in VIDEO_EXTS)
+                self.status.setText(f"Opened {ent.name} in media preview")
+                return
+
             content = await self.backend.read_text(ent.path)
             writable = True
             try:
