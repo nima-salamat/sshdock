@@ -242,9 +242,9 @@ class XtermTerminalWidget(QWidget):
         # cannot flash its default white page on first paint.
         self._paint_chrome(self._bg)
         if ok:
-            # Keep the WebEngine surface hidden until the JS bridge reports
-            # readiness. This avoids a second paint during Chromium startup.
-            QTimer.singleShot(80, self._flush_pending)
+            # Keep the WebEngine surface hidden and do not flush terminal data
+            # until QWebChannel/xterm has reported page readiness.
+            pass
         else:
             self._load_placeholder.setText("Terminal engine failed to load")
 
