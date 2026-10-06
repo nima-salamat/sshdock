@@ -1,6 +1,8 @@
 from __future__ import annotations
 import asyncio, json, shlex, struct, uuid
 from dataclasses import dataclass
+
+from app.core.runtime import create_task
 from pathlib import Path
 
 PROTOCOL=1
@@ -21,7 +23,10 @@ def encode_frame(value, max_size=MAX_FRAME):
 
 def decode_frame(raw,max_size=MAX_FRAME):
     if len(raw)>max_size: raise AgentProtocolError("agent frame too large")
-    value=json.loads(raw.decode())
+    try:
+        value=json.loads(raw.decode())
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise AgentProtocolError("invalid agent frame") from exc
     if not isinstance(value,dict): raise AgentProtocolError("agent frame must be an object")
     return value
 
@@ -71,7 +76,7 @@ class RemoteAgentClient:
             self.listener=await self.connection.forward_local_port("127.0.0.1",0,"127.0.0.1",self.remote_port)
             self.local_port=int(self.listener.get_port())
             self.reader,self.writer=await asyncio.wait_for(asyncio.open_connection("127.0.0.1",self.local_port),4)
-            self._reader_task=asyncio.create_task(self._reader_loop(),name="remote-agent-reader")
+            self._reader_task=create_task(self._reader_loop(),name="remote-agent-reader",owner="remote-agent")
             await self.request("hello",{"protocol":PROTOCOL,"token":self.token},timeout=4)
         except Exception:
             await self.close()
