@@ -673,59 +673,60 @@ class MainWindow(QMainWindow):
         try:
             stats_list = await dm.stats_all_with_quota()
         except Exception as exc:
-            self.stats_table.setRowCount(0)
-            self.stats_card_containers.setText("Error fetching stats")
+                self.stats_card_containers.setText("Error fetching stats")
             self.stats_card_cpu.setText(str(exc)[:80])
             return
 
         self.stats_table.setRowCount(0)
         total_cpu = 0.0
         total_mem_pct = 0.0
-        for s in stats_list:
-            name = (s.get("Name") or s.get("Container") or "—").lstrip("/")
-            cpu_num = s.get("_cpu_pct_normalised")
-            quota = s.get("_quota_cores")
-            if cpu_num is not None:
-                cpu_str = f"{cpu_num:.2f}%"
-                total_cpu += cpu_num
-            else:
-                cpu_str = s.get("CPUPerc") or "—"
-            if quota is not None:
-                quota_str = f"{quota:.1f} CPUs"
-            else:
-                quota_str = "unlimited"
-            mem_pct_str = s.get("MemPerc") or "—"
-            mem_pct_num = s.get("_mem_pct_num")
-            if mem_pct_num is not None:
-                total_mem_pct += mem_pct_num
-            mem_usage = s.get("MemUsage") or "—"
-            net_io = s.get("NetIO") or "—"
-            block_io = s.get("BlockIO") or "—"
-            pids = s.get("PIDs") or "—"
+        with self._atomic_table(self.stats_table, (0,)):
+            for s in stats_list:
+                name = (s.get("Name") or s.get("Container") or "—").lstrip("/")
+                cpu_num = s.get("_cpu_pct_normalised")
+                quota = s.get("_quota_cores")
+                if cpu_num is not None:
+                    cpu_str = f"{cpu_num:.2f}%"
+                    total_cpu += cpu_num
+                else:
+                    cpu_str = s.get("CPUPerc") or "—"
+                if quota is not None:
+                    quota_str = f"{quota:.1f} CPUs"
+                else:
+                    quota_str = "unlimited"
+                mem_pct_str = s.get("MemPerc") or "—"
+                mem_pct_num = s.get("_mem_pct_num")
+                if mem_pct_num is not None:
+                    total_mem_pct += mem_pct_num
+                mem_usage = s.get("MemUsage") or "—"
+                net_io = s.get("NetIO") or "—"
+                block_io = s.get("BlockIO") or "—"
+                pids = s.get("PIDs") or "—"
 
-            r = self.stats_table.rowCount()
-            self.stats_table.insertRow(r)
-            cells = [name, cpu_str, mem_pct_str, mem_usage, net_io, block_io, str(pids), quota_str]
-            for c, val in enumerate(cells):
-                item = QTableWidgetItem(str(val))
-                # Colour-code CPU%.
-                if c == 1 and cpu_num is not None:
-                    if cpu_num >= 80:
-                        item.setForeground(QColor("#ff5260"))
-                    elif cpu_num >= 50:
-                        item.setForeground(QColor("#ffca4b"))
-                    else:
-                        item.setForeground(QColor("#39d47a"))
-                # Colour-code Mem%.
-                if c == 2 and mem_pct_num is not None:
-                    if mem_pct_num >= 80:
-                        item.setForeground(QColor("#ff5260"))
-                    elif mem_pct_num >= 50:
-                        item.setForeground(QColor("#ffca4b"))
-                    else:
-                        item.setForeground(QColor("#39d47a"))
-                self.stats_table.setItem(r, c, item)
-            self.stats_table.setRowHeight(r, 34)
+                r = self.stats_table.rowCount()
+                self.stats_table.insertRow(r)
+                cells = [name, cpu_str, mem_pct_str, mem_usage, net_io, block_io, str(pids), quota_str]
+                for c, val in enumerate(cells):
+                    item = QTableWidgetItem(str(val))
+                    # Colour-code CPU%.
+                    if c == 1 and cpu_num is not None:
+                        if cpu_num >= 80:
+                            item.setForeground(QColor("#ff5260"))
+                        elif cpu_num >= 50:
+                            item.setForeground(QColor("#ffca4b"))
+                        else:
+                            item.setForeground(QColor("#39d47a"))
+                    # Colour-code Mem%.
+                    if c == 2 and mem_pct_num is not None:
+                        if mem_pct_num >= 80:
+                            item.setForeground(QColor("#ff5260"))
+                        elif mem_pct_num >= 50:
+                            item.setForeground(QColor("#ffca4b"))
+                        else:
+                            item.setForeground(QColor("#39d47a"))
+                    self.stats_table.setItem(r, c, item)
+                self.stats_table.setRowHeight(r, 34)
+
 
         n = len(stats_list)
         self.stats_card_containers.setText(f"{n} container{'s' if n != 1 else ''}")
@@ -2242,28 +2243,30 @@ class MainWindow(QMainWindow):
                 rows.append({"pid": pid, "user": user, "cpu_pct": cpu_val, "mem_pct": mem_val, "state": state, "command": cmd})
         else:
             rows = parse_top_output(text)
-        self.overview_processes.setRowCount(0)
-        for row in rows[:20]:
-            pid = str(row.get("pid") or "")
-            user = str(row.get("user") or "")
-            cpu_val = row.get("cpu_pct")
-            cpu = f"{cpu_val:.2f}" if cpu_val is not None else "—"
-            mem_val = row.get("mem_pct")
-            mem = f"{mem_val:.2f}" if mem_val is not None else "—"
-            state = str(row.get("state") or "")
-            cmd = str(row.get("command") or "")
-            r=self.overview_processes.rowCount(); self.overview_processes.insertRow(r)
-            for c,val in enumerate([pid, user, cpu, mem, state, cmd]):
-                item = QTableWidgetItem(val)
-                # Colour-code CPU%: green < 30%, yellow < 70%, red >= 70%.
-                if c == 2 and cpu_val is not None:
-                    if cpu_val >= 70:
-                        item.setForeground(QColor("#ff5260"))
-                    elif cpu_val >= 30:
-                        item.setForeground(QColor("#ffca4b"))
-                    else:
-                        item.setForeground(QColor("#39d47a"))
-                self.overview_processes.setItem(r, c, item)
+        with self._atomic_table(self.overview_processes, (0,)):
+            self.overview_processes.setRowCount(0)
+            for row in rows[:20]:
+                pid = str(row.get("pid") or "")
+                user = str(row.get("user") or "")
+                cpu_val = row.get("cpu_pct")
+                cpu = f"{cpu_val:.2f}" if cpu_val is not None else "—"
+                mem_val = row.get("mem_pct")
+                mem = f"{mem_val:.2f}" if mem_val is not None else "—"
+                state = str(row.get("state") or "")
+                cmd = str(row.get("command") or "")
+                r=self.overview_processes.rowCount(); self.overview_processes.insertRow(r)
+                for c,val in enumerate([pid, user, cpu, mem, state, cmd]):
+                    item = QTableWidgetItem(val)
+                    # Colour-code CPU%: green < 30%, yellow < 70%, red >= 70%.
+                    if c == 2 and cpu_val is not None:
+                        if cpu_val >= 70:
+                            item.setForeground(QColor("#ff5260"))
+                        elif cpu_val >= 30:
+                            item.setForeground(QColor("#ffca4b"))
+                        else:
+                            item.setForeground(QColor("#39d47a"))
+                    self.overview_processes.setItem(r, c, item)
+
         self.overview_proc_meta.setText(f"{len(rows)} processes · sorted by CPU (instantaneous)")
 
     async def load_containers(self):
@@ -3736,7 +3739,6 @@ class MainWindow(QMainWindow):
 
     async def load_images(self):
         # Clear BEFORE fetching so stale data doesn't persist on failure.
-        self.image_table.setRowCount(0)
         dm = DockerManager(self.manager.servers[self.current_id].ssh)
         try:
             rows = await dm.images()
@@ -3750,41 +3752,43 @@ class MainWindow(QMainWindow):
             used = await dm.used_images()
         except Exception:
             used = set()  # best-effort — just mark everything as unused
-        for x in rows:
-            r = self.image_table.rowCount(); self.image_table.insertRow(r)
-            repo = x.get("Repository") or "—"
-            tag = x.get("Tag") or "—"
-            iid = x.get("ID") or "—"
-            size = x.get("Size") or "—"
-            # Match against image name:tag, id, short id
-            ref = f"{repo}:{tag}" if repo != "<none>" and tag != "<none>" else ""
-            short = iid.replace("sha256:", "")[:12]
-            in_use = bool(
-                (ref and ref in used)
-                or (repo in used)
-                or (iid in used)
-                or (short and short in used)
-                or any(short and short in u for u in used)
-            )
-            dot = QTableWidgetItem("●" if in_use else "○")
-            dot.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            dot.setForeground(QColor("#39d47a" if in_use else "#6b7280"))
-            f = dot.font(); f.setPointSize(14); f.setBold(True); dot.setFont(f)
-            dot.setToolTip("In use by a container" if in_use else "Not used by any container")
-            self.image_table.setItem(r, 0, dot)
-            self.image_table.setItem(r, 1, QTableWidgetItem(repo))
-            self.image_table.setItem(r, 2, QTableWidgetItem(tag))
-            self.image_table.setItem(r, 3, QTableWidgetItem(iid))
-            self.image_table.setItem(r, 4, QTableWidgetItem(size))
-            img_ref = iid if iid and iid != "—" else (f"{repo}:{tag}" if repo != "—" else "")
-            entries = [
-                ("Inspect", "fa5s.search", lambda _=False, n=img_ref: self._spawn(self._inspect_resource("image", n))),
-                ("Copy ID", "fa5s.copy", lambda _=False, n=iid: QApplication.clipboard().setText(n)),
-                None,
-                ("Remove", "fa5s.trash", lambda _=False, n=img_ref: self._spawn(self._remove_image(n))),
-            ]
-            self.image_table.setCellWidget(r, 5, self._actions_cell(entries, f"Actions for {repo}:{tag}"))
-            self.image_table.setRowHeight(r, 38)
+        with self._atomic_table(self.image_table, (1, 3)):
+            for x in rows:
+                r = self.image_table.rowCount(); self.image_table.insertRow(r)
+                repo = x.get("Repository") or "—"
+                tag = x.get("Tag") or "—"
+                iid = x.get("ID") or "—"
+                size = x.get("Size") or "—"
+                # Match against image name:tag, id, short id
+                ref = f"{repo}:{tag}" if repo != "<none>" and tag != "<none>" else ""
+                short = iid.replace("sha256:", "")[:12]
+                in_use = bool(
+                    (ref and ref in used)
+                    or (repo in used)
+                    or (iid in used)
+                    or (short and short in used)
+                    or any(short and short in u for u in used)
+                )
+                dot = QTableWidgetItem("●" if in_use else "○")
+                dot.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                dot.setForeground(QColor("#39d47a" if in_use else "#6b7280"))
+                f = dot.font(); f.setPointSize(14); f.setBold(True); dot.setFont(f)
+                dot.setToolTip("In use by a container" if in_use else "Not used by any container")
+                self.image_table.setItem(r, 0, dot)
+                self.image_table.setItem(r, 1, QTableWidgetItem(repo))
+                self.image_table.setItem(r, 2, QTableWidgetItem(tag))
+                self.image_table.setItem(r, 3, QTableWidgetItem(iid))
+                self.image_table.setItem(r, 4, QTableWidgetItem(size))
+                img_ref = iid if iid and iid != "—" else (f"{repo}:{tag}" if repo != "—" else "")
+                entries = [
+                    ("Inspect", "fa5s.search", lambda _=False, n=img_ref: self._spawn(self._inspect_resource("image", n))),
+                    ("Copy ID", "fa5s.copy", lambda _=False, n=iid: QApplication.clipboard().setText(n)),
+                    None,
+                    ("Remove", "fa5s.trash", lambda _=False, n=img_ref: self._spawn(self._remove_image(n))),
+                ]
+                self.image_table.setCellWidget(r, 5, self._actions_cell(entries, f"Actions for {repo}:{tag}"))
+                self.image_table.setRowHeight(r, 38)
+
         self._image_rows = rows
     def _filter_images(self,text):
         for r in range(self.image_table.rowCount()): self.image_table.setRowHidden(r,text.lower() not in " ".join((self.image_table.item(r,c).text() if self.image_table.item(r,c) else "") for c in range(1,5)).lower())
@@ -3797,7 +3801,6 @@ class MainWindow(QMainWindow):
 
     async def load_volumes(self, usage=None):
         # Clear BEFORE fetching so stale data doesn't persist on failure.
-        self.volume_table.setRowCount(0)
         self.volume_table.verticalHeader().setDefaultSectionSize(38)
         dm=DockerManager(self.manager.servers[self.current_id].ssh)
         try:
@@ -3812,21 +3815,23 @@ class MainWindow(QMainWindow):
             used_volumes = usage[0] if usage else (await dm.resource_usage())[0]
         except Exception:
             used_volumes = set()
-        for x in rows:
-            name=x.get("Name","—"); r=self.volume_table.rowCount(); self.volume_table.insertRow(r)
-            in_use = name in used_volumes
-            used_txt = "● Used" if in_use else "○ Unused"
-            vals=[name,x.get("Driver","—"),x.get("Scope","—"), used_txt]
-            for c,val in enumerate(vals): self.volume_table.setItem(r,c,QTableWidgetItem(str(val)))
-            self.volume_table.item(r,3).setForeground(QColor("#39d47a" if in_use else "#6b7280"))
-            entries = [
-                ("Inspect", "fa5s.search", lambda _=False, n=name: self._spawn(self._inspect_resource("volume", n))),
-                ("Copy name", "fa5s.copy", lambda _=False, n=name: QApplication.clipboard().setText(n)),
-                None,
-                ("Remove", "fa5s.trash", lambda _=False, n=name: self._spawn(self._remove_volume(n))),
-            ]
-            self.volume_table.setCellWidget(r, 4, self._actions_cell(entries, f"Actions for {name}"))
-            self.volume_table.setRowHeight(r, 38)
+        with self._atomic_table(self.volume_table, (0,)):
+            for x in rows:
+                name=x.get("Name","—"); r=self.volume_table.rowCount(); self.volume_table.insertRow(r)
+                in_use = name in used_volumes
+                used_txt = "● Used" if in_use else "○ Unused"
+                vals=[name,x.get("Driver","—"),x.get("Scope","—"), used_txt]
+                for c,val in enumerate(vals): self.volume_table.setItem(r,c,QTableWidgetItem(str(val)))
+                self.volume_table.item(r,3).setForeground(QColor("#39d47a" if in_use else "#6b7280"))
+                entries = [
+                    ("Inspect", "fa5s.search", lambda _=False, n=name: self._spawn(self._inspect_resource("volume", n))),
+                    ("Copy name", "fa5s.copy", lambda _=False, n=name: QApplication.clipboard().setText(n)),
+                    None,
+                    ("Remove", "fa5s.trash", lambda _=False, n=name: self._spawn(self._remove_volume(n))),
+                ]
+                self.volume_table.setCellWidget(r, 4, self._actions_cell(entries, f"Actions for {name}"))
+                self.volume_table.setRowHeight(r, 38)
+
 
 
     async def _inspect_resource(self, kind: str, name: str):
@@ -3865,7 +3870,6 @@ class MainWindow(QMainWindow):
         await DockerManager(self.manager.servers[self.current_id].ssh).run(["volume","rm",name],120); await self.load_volumes()
     async def load_networks(self, usage=None):
         # Clear BEFORE fetching so stale data doesn't persist on failure.
-        self.network_table.setRowCount(0)
         self.network_table.verticalHeader().setDefaultSectionSize(38)
         dm=DockerManager(self.manager.servers[self.current_id].ssh)
         try:
