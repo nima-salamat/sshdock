@@ -92,5 +92,5 @@ def test_process_sigint_uses_normal_graceful_shutdown_path():
     assert "signal.SIGINT" in src
     assert "signal.SIGTERM" in src
     assert "main_window.close()" in src
-    assert "widget.__class__.__name__ == "ConnectionDialog"" in src
+    assert 'widget.__class__.__name__ == "ConnectionDialog"' in src
     assert "restore_signal_handlers()" in src
