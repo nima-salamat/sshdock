@@ -187,11 +187,13 @@ class TerminalFileExplorer(QWidget):
         self.up_btn = self._button("fa5s.level-up-alt", "Parent directory", self.go_up)
         self.refresh_btn = self._button("fa5s.sync-alt", "Refresh", self.refresh)
         self.upload_btn = self._button("fa5s.upload", "Upload files here", self.upload_files)
-        self.download_btn = self._button("fa5s.download", "Download selected files", self.download_selected)
+        self.upload_folder_btn = self._button("fa5s.folder-plus", "Upload folder here", self.upload_folder)
+        self.download_btn = self._button("fa5s.download", "Download selected files/folders", self.download_selected)
         self.close_btn = self._button("fa5s.times", "Close explorer", self.closed_requested.emit)
         header.addWidget(self.up_btn)
         header.addWidget(self.refresh_btn)
         header.addWidget(self.upload_btn)
+        header.addWidget(self.upload_folder_btn)
         header.addWidget(self.download_btn)
         header.addWidget(self.close_btn)
         root.addLayout(header)
@@ -266,6 +268,13 @@ class TerminalFileExplorer(QWidget):
         self.style().polish(self)
         self.update()
 
+    def _transfer_progress(self, direction: str, done: int, total: int):
+        if total <= 0:
+            self.status.setText(f"{direction}: {done:,} bytes")
+            return
+        percent = max(0, min(100, int(done * 100 / total)))
+        self.status.setText(f"{direction}: {percent}% · {done:,}/{total:,} bytes")
+
     async def upload_files(self):
         files, _ = QFileDialog.getOpenFileNames(self, "Upload files")
         if not files:
@@ -274,13 +283,33 @@ class TerminalFileExplorer(QWidget):
         for local in files:
             try:
                 name = os.path.basename(local)
-                await self.backend.upload(local, posixpath.join(self.current_path, name))
+                await self.backend.upload(
+                    local,
+                    posixpath.join(self.current_path, name),
+                    progress_handler=lambda _src, _dst, done, total: self._transfer_progress("Uploading", done, total),
+                )
                 ok += 1
             except Exception as exc:
-                self.status.setText(f"Upload failed: {str(exc)[:100]}")
+                self.status.setText(f"Upload failed: {str(exc)[:140]}")
                 break
-        self.status.setText(f"Uploaded {ok}/{len(files)} file(s) to {self.current_path}")
+        self.status.setText(f"Uploaded {ok}/{len(files)} item(s) to {self.current_path}")
         self._show_path()
+
+    async def upload_folder(self):
+        local = QFileDialog.getExistingDirectory(self, "Upload folder")
+        if not local:
+            return
+        name = os.path.basename(os.path.normpath(local))
+        try:
+            await self.backend.upload(
+                local,
+                posixpath.join(self.current_path, name),
+                progress_handler=lambda _src, _dst, done, total: self._transfer_progress("Uploading", done, total),
+            )
+            self.status.setText(f"Uploaded folder {name}")
+            self._show_path()
+        except Exception as exc:
+            self.status.setText(f"Upload folder failed: {str(exc)[:140]}")
 
     async def download_selected(self):
         items = self.tree.selectedItems()
@@ -290,13 +319,7 @@ class TerminalFileExplorer(QWidget):
             if isinstance(data, Entry):
                 entries.append(data)
         if not entries:
-            self.status.setText("Select one or more files to download.")
-            return
-        dirs = [e for e in entries if e.is_dir]
-        if dirs:
-            self.status.setText("Folder download will be added to the transfer manager; select files for now.")
-        entries = [e for e in entries if not e.is_dir]
-        if not entries:
+            self.status.setText("Select one or more files/folders to download.")
             return
         target = QFileDialog.getExistingDirectory(self, "Download to")
         if not target:
@@ -304,12 +327,16 @@ class TerminalFileExplorer(QWidget):
         ok = 0
         for ent in entries:
             try:
-                await self.backend.download(ent.path, os.path.join(target, ent.name))
+                await self.backend.download(
+                    ent.path,
+                    os.path.join(target, ent.name),
+                    progress_handler=lambda _src, _dst, done, total: self._transfer_progress("Downloading", done, total),
+                )
                 ok += 1
             except Exception as exc:
-                self.status.setText(f"Download failed: {str(exc)[:100]}")
+                self.status.setText(f"Download failed: {str(exc)[:140]}")
                 break
-        self.status.setText(f"Downloaded {ok}/{len(entries)} file(s)")
+        self.status.setText(f"Downloaded {ok}/{len(entries)} item(s) to {target}")
 
     def _normalize(self, path: str) -> str:
         path = posixpath.normpath(path or "/")
@@ -499,7 +526,8 @@ class TerminalFileExplorer(QWidget):
                 download_action = menu.addAction("Download")
             menu.addSeparator()
             copy_action = menu.addAction("Copy path")
-            upload_action = menu.addAction("Upload here")
+            upload_action = menu.addAction("Upload files here")
+            upload_folder_action = menu.addAction("Upload folder here")
             chosen = menu.exec(self.tree.viewport().mapToGlobal(pos))
             if chosen is open_action:
                 self._activated(item, 0)
@@ -512,6 +540,8 @@ class TerminalFileExplorer(QWidget):
                 self._spawn(self.download_one(data))
             elif chosen is upload_action:
                 self._spawn(self.upload_files())
+            elif chosen is upload_folder_action:
+                self._spawn(self.upload_folder())
         elif isinstance(data, dict) and data.get("dir"):
             cd_action = menu.addAction("cd in terminal")
             copy_action = menu.addAction("Copy path")
