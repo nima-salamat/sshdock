@@ -27,6 +27,13 @@ def test_terminal_explorer_restores_button_factory():
     assert "def _button(self, icon_name: str, tooltip: str, callback):" in src
     assert "self.search_btn = self._button(" in src
 
+def test_terminal_explorer_buttons_schedule_async_callbacks():
+    src = (ROOT / "app/files/terminal_explorer.py").read_text(encoding="utf-8")
+    assert "import inspect" in src
+    assert "result = callback()" in src
+    assert "if inspect.isawaitable(result):" in src
+    assert "self._spawn(result)" in src
+
 def test_terminal_panel_toggles_show_active_state():
     src = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
     styles = (ROOT / "app/ui/styles.py").read_text(encoding="utf-8")
