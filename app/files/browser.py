@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from app.docker.manager import DockerManager
 from app.files.highlighter import CodeHighlighter
+from app.files.file_types import classify, color_for
 from app.ui.dialogs import ErrorDialog
 
 
@@ -552,27 +553,11 @@ class FileBrowserPane(QWidget):
             r = self.table.rowCount()
             self.table.insertRow(r)
             is_link = (ent.mode or "").startswith("link")
-            if ent.is_dir:
-                kind = "Folder" + (" link" if is_link else "")
-                icon_name = "fa5s.folder" if not is_link else "fa5s.folder-plus"
-                color = "#74a7ff"
-            else:
-                kind = "File" + (" link" if is_link else "")
-                lower = ent.name.lower()
-                if lower.endswith((".py", ".pyw")):
-                    icon_name, color = "fa5b.python", "#5cff8a"
-                elif lower.endswith((".js", ".ts", ".tsx", ".jsx")):
-                    icon_name, color = "fa5b.js", "#f7df1e"
-                elif lower.endswith((".json", ".yml", ".yaml", ".toml")):
-                    icon_name, color = "fa5s.code", "#d68cff"
-                elif lower.endswith((".md", ".txt", ".log")):
-                    icon_name, color = "fa5s.file-alt", "#9aa6b5"
-                elif lower.endswith((".sh", ".bash", ".zsh")):
-                    icon_name, color = "fa5s.terminal", "#52e8ff"
-                elif lower.endswith((".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")):
-                    icon_name, color = "fa5s.image", "#ffd866"
-                else:
-                    icon_name, color = "fa5s.file", "#9fb0c3"
+            theme = str(QApplication.instance().property("sshdockTheme") or "dark").lower()
+            ft = classify(ent.name, is_dir=ent.is_dir, is_symlink=is_link)
+            kind = ("Folder" if ent.is_dir else "File") + (" link" if is_link else "")
+            icon_name = ft.icon
+            color = color_for(ft.key, theme)
             name = QTableWidgetItem(ent.name)
             name.setData(Qt.ItemDataRole.UserRole, ent)
             name.setToolTip(ent.path)
