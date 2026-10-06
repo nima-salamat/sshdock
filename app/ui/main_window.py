@@ -665,22 +665,21 @@ class MainWindow(QMainWindow):
         return page
 
     async def load_container_stats(self):
-        """Fetch stats for all running containers and populate the table."""
+        """Fetch stats for all running containers and replace the table atomically."""
         if not self.current_id:
             return
-        from app.docker.manager import DockerManager
         dm = DockerManager(self.manager.servers[self.current_id].ssh)
         try:
             stats_list = await dm.stats_all_with_quota()
         except Exception as exc:
-                self.stats_card_containers.setText("Error fetching stats")
+            self.stats_card_containers.setText("Unable to refresh stats")
             self.stats_card_cpu.setText(str(exc)[:80])
             return
 
-        self.stats_table.setRowCount(0)
         total_cpu = 0.0
         total_mem_pct = 0.0
         with self._atomic_table(self.stats_table, (0,)):
+            self.stats_table.setRowCount(0)
             for s in stats_list:
                 name = (s.get("Name") or s.get("Container") or "—").lstrip("/")
                 cpu_num = s.get("_cpu_pct_normalised")
@@ -690,49 +689,36 @@ class MainWindow(QMainWindow):
                     total_cpu += cpu_num
                 else:
                     cpu_str = s.get("CPUPerc") or "—"
-                if quota is not None:
-                    quota_str = f"{quota:.1f} CPUs"
-                else:
-                    quota_str = "unlimited"
+                quota_str = f"{quota:.1f} CPUs" if quota is not None else "unlimited"
                 mem_pct_str = s.get("MemPerc") or "—"
                 mem_pct_num = s.get("_mem_pct_num")
                 if mem_pct_num is not None:
                     total_mem_pct += mem_pct_num
-                mem_usage = s.get("MemUsage") or "—"
-                net_io = s.get("NetIO") or "—"
-                block_io = s.get("BlockIO") or "—"
-                pids = s.get("PIDs") or "—"
-
-                r = self.stats_table.rowCount()
-                self.stats_table.insertRow(r)
-                cells = [name, cpu_str, mem_pct_str, mem_usage, net_io, block_io, str(pids), quota_str]
-                for c, val in enumerate(cells):
-                    item = QTableWidgetItem(str(val))
-                    # Colour-code CPU%.
-                    if c == 1 and cpu_num is not None:
-                        if cpu_num >= 80:
-                            item.setForeground(QColor("#ff5260"))
-                        elif cpu_num >= 50:
-                            item.setForeground(QColor("#ffca4b"))
-                        else:
-                            item.setForeground(QColor("#39d47a"))
-                    # Colour-code Mem%.
-                    if c == 2 and mem_pct_num is not None:
-                        if mem_pct_num >= 80:
-                            item.setForeground(QColor("#ff5260"))
-                        elif mem_pct_num >= 50:
-                            item.setForeground(QColor("#ffca4b"))
-                        else:
-                            item.setForeground(QColor("#39d47a"))
-                    self.stats_table.setItem(r, c, item)
-                self.stats_table.setRowHeight(r, 34)
-
+                cells = [
+                    name, cpu_str, mem_pct_str, s.get("MemUsage") or "—",
+                    s.get("NetIO") or "—", s.get("BlockIO") or "—",
+                    str(s.get("PIDs") or "—"), quota_str,
+                ]
+                row = self.stats_table.rowCount()
+                self.stats_table.insertRow(row)
+                for col, value in enumerate(cells):
+                    item = QTableWidgetItem(str(value))
+                    if col in (1, 2):
+                        numeric = cpu_num if col == 1 else mem_pct_num
+                        if numeric is not None:
+                            item.setForeground(
+                                QColor("#ff5260") if numeric >= 80
+                                else QColor("#ffca4b") if numeric >= 50
+                                else QColor("#39d47a")
+                            )
+                    self.stats_table.setItem(row, col, item)
+                self.stats_table.setRowHeight(row, 34)
 
         n = len(stats_list)
         self.stats_card_containers.setText(f"{n} container{'s' if n != 1 else ''}")
         self.stats_card_cpu.setText(f"Total CPU: {total_cpu:.1f}%")
         self.stats_card_mem.setText(f"Total Mem: {total_mem_pct:.1f}%")
-        self.statusBar().showMessage(f"Stats refreshed · {n} containers", 3000)
+        self.statusBar().showMessage(f"Stats refreshed · {n} containers", 1800)
 
 
     def _images_page(self):
@@ -2274,8 +2260,6 @@ class MainWindow(QMainWindow):
             return
         from app.services.containers import ContainerService
         from app.docker.manager import DockerManager
-        # Clear BEFORE fetching so stale data doesn't persist on failure.
-        self._render_containers([])
         svc = ContainerService(DockerManager(self.manager.servers[self.current_id].ssh))
         try:
             infos = await svc.list_containers(all_=True)
@@ -3869,35 +3853,43 @@ class MainWindow(QMainWindow):
         if QMessageBox.question(self,"Remove volume",f"Remove {name}?")!=QMessageBox.StandardButton.Yes:return
         await DockerManager(self.manager.servers[self.current_id].ssh).run(["volume","rm",name],120); await self.load_volumes()
     async def load_networks(self, usage=None):
-        # Clear BEFORE fetching so stale data doesn't persist on failure.
+        if not self.current_id:
+            return
         self.network_table.verticalHeader().setDefaultSectionSize(38)
-        dm=DockerManager(self.manager.servers[self.current_id].ssh)
+        dm = DockerManager(self.manager.servers[self.current_id].ssh)
         try:
-            rows=await dm.networks()
+            rows = await dm.networks()
         except Exception as exc:
             log.warning("Network list fetch failed: %s", exc)
-            r = self.network_table.rowCount()
-            self.network_table.insertRow(r)
-            self.network_table.setItem(r, 0, QTableWidgetItem(f"Error loading networks: {exc}"))
+            self.statusBar().showMessage(f"Could not refresh networks: {exc}", 5000)
             return
         try:
             used_networks = usage[1] if usage else (await dm.resource_usage())[1]
         except Exception:
             used_networks = set()
-        for x in rows:
-            name=x.get("Name","—"); r=self.network_table.rowCount(); self.network_table.insertRow(r)
-            in_use = name in used_networks
-            vals=[name,x.get("Driver","—"),x.get("Scope","—"),"● Used" if in_use else "○ Unused",x.get("ID","—")]
-            for c,val in enumerate(vals): self.network_table.setItem(r,c,QTableWidgetItem(str(val)))
-            self.network_table.item(r,3).setForeground(QColor("#39d47a" if in_use else "#6b7280"))
-            entries = [
-                ("Inspect", "fa5s.search", lambda _=False, n=name: self._spawn(self._inspect_resource("network", n))),
-                ("Copy name", "fa5s.copy", lambda _=False, n=name: QApplication.clipboard().setText(n)),
-                None,
-                ("Remove", "fa5s.trash", lambda _=False, n=name: self._spawn(self._remove_network(n))),
-            ]
-            self.network_table.setCellWidget(r, 5, self._actions_cell(entries, f"Actions for {name}"))
-            self.network_table.setRowHeight(r, 38)
+        with self._atomic_table(self.network_table, (0,)):
+            self.network_table.setRowCount(0)
+            for x in rows:
+                name = x.get("Name", "—")
+                row = self.network_table.rowCount()
+                self.network_table.insertRow(row)
+                in_use = name in used_networks
+                vals = [name, x.get("Driver","—"), x.get("Scope","—"),
+                        "● Used" if in_use else "○ Unused", x.get("ID","—")]
+                for col, value in enumerate(vals):
+                    self.network_table.setItem(row, col, QTableWidgetItem(str(value)))
+                self.network_table.item(row, 3).setForeground(
+                    QColor("#39d47a" if in_use else "#6b7280")
+                )
+                entries = [
+                    ("Inspect", "fa5s.search", lambda _=False, n=name: self._spawn(self._inspect_resource("network", n))),
+                    ("Copy name", "fa5s.copy", lambda _=False, n=name: QApplication.clipboard().setText(n)),
+                    None,
+                    ("Remove", "fa5s.trash", lambda _=False, n=name: self._spawn(self._remove_network(n))),
+                ]
+                self.network_table.setCellWidget(row, 5, self._actions_cell(entries, f"Actions for {name}"))
+                self.network_table.setRowHeight(row, 38)
+
     async def _remove_network(self,name):
         if QMessageBox.question(self,"Remove network",f"Remove {name}?")!=QMessageBox.StandardButton.Yes:return
         await DockerManager(self.manager.servers[self.current_id].ssh).run(["network","rm",name],120); await self.load_networks()
