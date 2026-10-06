@@ -88,7 +88,7 @@ def test_terminal_has_dedicated_scrollbar_gutter():
 def test_magic_table_has_prompt_fallback_and_scrollbar_sync_without_tables():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
     assert "const startAbs = Math.max(0, promptAbs - RESERVE);" in src
-    assert "b._anchorPromptAbs = promptAbs;" in src
+    assert "block._anchorPromptAbs = promptAbs;" in src
     assert "if (!term._sshdockScrollBarHook)" in src
     assert "term.onWriteParsed(function(){ syncScrollBar(); })" in src
     assert "term.onRender(function(){ syncScrollBar(); })" in src
