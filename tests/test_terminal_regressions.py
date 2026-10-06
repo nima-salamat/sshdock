@@ -214,3 +214,26 @@ def test_terminal_explorer_search_matches_path_and_type():
     assert 'str(data.path or "")' in src
     assert '"directory" if data.is_dir else "file"' in src
     assert 'ft.key' in src
+
+
+def test_terminal_explorer_has_transfer_progress_delete_and_media_controls():
+    src = (ROOT / "app/files/terminal_explorer.py").read_text(encoding="utf-8")
+    assert "class _TransferDialog(QDialog):" in src
+    assert "self.progress = QProgressBar()" in src
+    assert "ETA" in src
+    assert "set_cancel_callback" in src
+    assert "async def delete_selected(self):" in src
+    assert "Delete these selected items?" in src
+    assert "self.delete_btn = self._button(" in src
+    assert "IMAGE_EXTS" in src
+    assert "VIDEO_EXTS" in src
+    assert "def open_media(self, path, *, is_video):" in src
+    assert '"Source"' in src
+    assert "task.cancel()" in src
+
+
+def test_server_file_backend_exposes_sftp_progress_hooks_for_transfers():
+    src = (ROOT / "app/files/browser.py").read_text(encoding="utf-8")
+    assert "async def download(self, path: str, local: str, progress_handler=None):" in src
+    assert "async def upload(self, local: str, remote: str, progress_handler=None):" in src
+    assert "progress_handler=progress_handler" in src
