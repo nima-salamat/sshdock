@@ -109,8 +109,8 @@ def test_resource_usage_uses_batch_inspect():
     # New batch pattern uses xargs so one inspect command handles all IDs.
     assert "| xargs -r docker volume inspect" in DOCKER_MANAGER_SRC
     assert "--format" in DOCKER_MANAGER_SRC
-    assert "$(docker volume ls -q" in DOCKER_MANAGER_SRC
-    assert "$(docker network ls -q" in DOCKER_MANAGER_SRC
+    assert "docker volume ls -q 2>/dev/null | xargs -r docker volume inspect" in DOCKER_MANAGER_SRC
+    assert "docker network ls -q 2>/dev/null | xargs -r docker network inspect" in DOCKER_MANAGER_SRC
 
 
 def test_resource_usage_timeout_reduced():
