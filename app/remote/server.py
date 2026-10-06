@@ -30,6 +30,23 @@ class Agent:
         self.stop=asyncio.Event()
 
     async def handle(self,r,w):
+        write_lock=asyncio.Lock()
+        tasks=set()
+
+        async def write_response(payload):
+            async with write_lock:
+                w.write(frame(payload))
+                await w.drain()
+
+        async def process(q):
+            rid=str(q.get("id",""))
+            try:
+                result=await self.dispatch(str(q.get("method","")),q.get("params") or {})
+                await write_response({"id":rid,"ok":True,"result":result})
+            except Exception as exc:
+                await write_response({"id":rid,"ok":False,"error":{
+                    "type":type(exc).__name__,"message":str(exc)[:1000]}})
+
         try:
             while not self.stop.is_set():
                 try:
@@ -37,17 +54,15 @@ class Agent:
                 except asyncio.TimeoutError:
                     return
                 if q is None: return
-                rid=str(q.get("id",""))
-                try:
-                    result=await self.dispatch(str(q.get("method","")),q.get("params") or {})
-                    w.write(frame({"id":rid,"ok":True,"result":result}))
-                except Exception as exc:
-                    w.write(frame({"id":rid,"ok":False,"error":{
-                        "type":type(exc).__name__,"message":str(exc)[:1000]}}))
-                await w.drain()
+                task=asyncio.create_task(process(q),name="sshdock-agent-request")
+                tasks.add(task)
+                task.add_done_callback(tasks.discard)
         except (asyncio.IncompleteReadError,ConnectionError,OSError):
             pass
         finally:
+            pending=tuple(tasks)
+            if pending:
+                await asyncio.gather(*pending,return_exceptions=True)
             w.close()
             try: await w.wait_closed()
             except Exception: pass
