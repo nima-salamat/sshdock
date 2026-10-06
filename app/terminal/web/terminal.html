@@ -408,12 +408,21 @@
 
             function sync(){
               const list=window._sshdockTbls||[];
-              const viewportY=term.buffer.active.viewportY;
+              const activeBuffer = term.buffer && term.buffer.active;
+              const inAlternateScreen = !!activeBuffer && activeBuffer.type === 'alternate';
+              const viewportY=activeBuffer ? activeBuffer.viewportY : 0;
               const ch=cellH();
               const viewH=host.clientHeight||0;
               for (let i=0;i<list.length;i++){
                 const b=list[i];
                 if (!b||!b.parentNode) continue;
+                if (inAlternateScreen) {
+                  // Full-screen/TUI applications (nano, vim, less, top, etc.)
+                  // own the entire terminal viewport. Never let our HTML table
+                  // overlay that application.
+                  b.style.display = 'none';
+                  continue;
+                }
                 const start=b._startAbs|0;
                 const cells=b._cells|RESERVE;
                 const top=(start-viewportY)*ch;
@@ -431,6 +440,13 @@
             if (!term._sshdockScrollHook) {
               term._sshdockScrollHook = true;
               try { term.onScroll(function(){ sync(); }); } catch(e){}
+              // xterm.js exposes normal/alternate buffer transitions directly.
+              // This is the reliable generic signal for full-screen terminal apps.
+              try {
+                if (term.buffer && term.buffer.onBufferChange) {
+                  term.buffer.onBufferChange(function(){ sync(); });
+                }
+              } catch(e){}
               // Also sync when xterm re-renders / fits
               try {
                 if (term.onRender) term.onRender(function(){ sync(); });
