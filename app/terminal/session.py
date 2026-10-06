@@ -3,10 +3,9 @@ from __future__ import annotations
 import asyncio
 import re
 import posixpath
-import shlex
 from uuid import uuid4
 
-from app.terminal.docker_pretty import DOCKER_PRETTY_SH
+from app.terminal.docker_pretty import install_command
 
 from PySide6.QtCore import QObject, Signal
 
@@ -51,9 +50,10 @@ class TerminalSession(QObject):
         self._closing = False
         self.status.emit("● Connecting…")
         try:
-            shell = await self._detect_shell()
-            command = await self._prepare_shell_bootstrap(shell)
-            self.channel = await self.ssh.open_shell(command=command)
+            # Open the user's normal interactive shell first. This preserves
+            # ~/.bashrc, ~/.zshrc, aliases, functions, PATH customizations,
+            # prompt plugins and other user shell integration.
+            self.channel = await self.ssh.open_shell()
             self.running = True
             self.status.emit("● Connected")
             self.reader_task = create_task(
@@ -61,15 +61,17 @@ class TerminalSession(QObject):
                 name=f"terminal-reader-{self.id[:8]}",
                 owner="terminal",
             )
+            # Let the user's shell finish normal startup before augmenting it.
+            await asyncio.sleep(0.15)
+            await self._install_shell_integration()
         except Exception as exc:
             self.running = False
             self.channel = None
-            await self._cleanup_bootstrap()
             self.status.emit(f"● Failed: {exc}")
             raise
 
     async def _detect_shell(self) -> str:
-        """Detect the user's login shell without touching the interactive PTY."""
+        """Detect the user's login shell without changing the interactive PTY."""
         try:
             result = await self.ssh.run_fast(
                 "printf '%s' \"${SHELL:-/bin/sh}\"",
@@ -82,32 +84,53 @@ class TerminalSession(QObject):
             pass
         return "/bin/sh"
 
-    async def _write_bootstrap(self, path: str, content: str) -> None:
-        """Write startup code over a non-PTY SSH exec channel."""
-        proc = await self.ssh.start_command("cat > " + shlex.quote(path))
-        try:
-            proc.stdin.write(content)
-            proc.stdin.write_eof()
-            await asyncio.wait_for(proc.wait_closed(), 4.0)
-        finally:
-            try:
-                await proc.stdin.drain()
-            except Exception:
-                pass
+    async def _install_shell_integration(self):
+        """Augment the live shell without replacing user startup files."""
+        if not self.channel or self.channel.closed:
+            return
 
-    async def _prepare_shell_bootstrap(self, shell: str) -> str:
+        shell = await self._detect_shell()
         shell_name = posixpath.basename(shell)
-        token = uuid4().hex[:16]
-
-        if shell_name == "bash":
-            path = f"/tmp/.sshdock-bashrc-{token}"
-            script = "\n".join([
-                "# SSHDock private terminal bootstrap",
+        if shell_name == "fish":
+            setup_parts = [
+                "stty -echo 2>/dev/null",
+                "set -gx TERM xterm-256color",
+                "set -gx COLORTERM truecolor",
+                "set -gx CLICOLOR 1",
+                "function __sshdock_cwd; printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; end",
+                "function __sshdock_cwd_prompt --on-event fish_prompt; __sshdock_cwd; end",
+                "function mdocker; if test (count $argv) -lt 1; printf 'usage: mdocker <ps|images|volume|network|stats|compose|service|system|context|plugin|node|stack|secret|config> [args]\\n' >&2; return 1; end; printf '\\033]777;sshdock-magic;%s\\007' (string join ' ' -- $argv); string repeat -n 20 \\n; end",
+                "alias mdps 'mdocker ps' 2>/dev/null",
+                "alias mdpa 'mdocker ps -a' 2>/dev/null",
+                "alias mdimg 'mdocker images' 2>/dev/null",
+                "alias mdvol 'mdocker volume ls' 2>/dev/null",
+                "alias mdnet 'mdocker network ls' 2>/dev/null",
+                "alias mdstats 'mdocker stats' 2>/dev/null",
+                "__sshdock_cwd",
+                "stty echo 2>/dev/null",
+            ]
+        else:
+            setup_parts = [
                 "stty -echo 2>/dev/null",
                 "export TERM=xterm-256color COLORTERM=truecolor CLICOLOR=1",
                 "__sshdock_cwd(){ printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; }",
-                "PROMPT_COMMAND=\"__sshdock_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}\"",
-                "PS1='\\[\\033[01;32m\\]\\u@\\h\\[\\033[00m\\]:\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\$ '",
+            ]
+            if shell_name == "bash":
+                setup_parts.extend([
+                    "if declare -p PROMPT_COMMAND 2>/dev/null | grep -q 'declare -a'; then case \" ${PROMPT_COMMAND[*]} \" in *\" __sshdock_cwd \"*) ;; *) PROMPT_COMMAND+=(__sshdock_cwd);; esac; else case \";${PROMPT_COMMAND:-};\" in *\";__sshdock_cwd;\"*) ;; *) PROMPT_COMMAND=\"__sshdock_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}\";; esac; fi",
+                    "case \"${PS1:-}\" in ''|'\\u@\\h:\\w\\$ ') PS1='\\[\\033[01;32m\\]\\u@\\h\\[\\033[00m\\]:\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\$ ';; esac",
+                ])
+            elif shell_name == "zsh":
+                setup_parts.extend([
+                    "autoload -Uz add-zsh-hook 2>/dev/null; if type add-zsh-hook >/dev/null 2>&1; then add-zsh-hook precmd __sshdock_cwd; else typeset -ga precmd_functions; case \" ${precmd_functions[*]} \" in *\" __sshdock_cwd \"*) ;; *) precmd_functions+=(__sshdock_cwd);; esac; fi",
+                    "case \"${PROMPT:-}\" in ''|'%n@%m:%~%# ') PROMPT='%F{green}%n@%m%f:%F{blue}%~%f%# ';; esac",
+                ])
+            else:
+                setup_parts.extend([
+                    "case \"${PS1:-}\" in '') _sshdock_g=$(printf '\\033[01;32m'); _sshdock_b=$(printf '\\033[01;34m'); _sshdock_r=$(printf '\\033[00m'); PS1=\"${_sshdock_g}${USER:-$(id -un)}@$(hostname):${_sshdock_b}\\w${_sshdock_r}$$ \";; esac",
+                ])
+
+            setup_parts.extend([
                 "alias ls='ls --color=auto' 2>/dev/null",
                 "alias grep='grep --color=auto' 2>/dev/null",
                 "alias fgrep='fgrep --color=auto' 2>/dev/null",
@@ -115,44 +138,16 @@ class TerminalSession(QObject):
                 "alias ll='ls -alF --color=auto' 2>/dev/null",
                 "alias la='ls -A --color=auto' 2>/dev/null",
                 "command -v dircolors >/dev/null 2>&1 && eval \"$(dircolors -b 2>/dev/null)\"",
-                DOCKER_PRETTY_SH,
+                install_command(),
                 "__sshdock_cwd",
-            ]).join("\n") + "\n"
-            await self._write_bootstrap(path, script)
-            self._bootstrap_path = path
-            return "exec " + shlex.quote(shell) + " --noprofile --rcfile " + shlex.quote(path) + " -i"
-
-        if shell_name == "zsh":
-            directory = f"/tmp/.sshdock-zdot-{token}"
-            path = f"{directory}/.zshrc"
-            script = "\n".join([
-                "# SSHDock private terminal bootstrap",
-                "stty -echo 2>/dev/null",
-                "export TERM=xterm-256color COLORTERM=truecolor CLICOLOR=1",
-                "precmd() { printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; }",
-                "PROMPT='%F{green}%n@%m%f:%F{blue}%~%f%# '",
-                "alias ls='ls --color=auto' 2>/dev/null",
-                "alias ll='ls -alF --color=auto' 2>/dev/null",
-                "alias la='ls -A --color=auto' 2>/dev/null",
-                "precmd",
-            ]).join("\n") + "\n"
-            await self.ssh.run_fast("mkdir -m 700 -p " + shlex.quote(directory), timeout=3)
-            await self._write_bootstrap(path, script)
-            self._bootstrap_path = directory
-            return "ZDOTDIR=" + shlex.quote(directory) + " exec " + shlex.quote(shell) + " -d -i"
-
-        return "exec " + shlex.quote(shell) + " -i"
-
-    async def _cleanup_bootstrap(self) -> None:
-        path = self._bootstrap_path
-        self._bootstrap_path = None
-        if not path:
-            return
+                "stty echo 2>/dev/null",
+                "printf '\\r\\033[K'\\r",
+            ])
+        setup = "; ".join(p for p in setup_parts if p)
         try:
-            await self.ssh.run_fast("rm -rf -- " + shlex.quote(path), timeout=3)
+            await asyncio.wait_for(self.channel.write((setup + "\r").encode("utf-8")), timeout=5.0)
         except Exception:
             pass
-
     def _extract_cwd(self, data: bytes) -> bytes:
         """Parse OSC 7 (cwd) + OSC 777 magic; strip magic from stream."""
         blob = self._osc_buf + data
