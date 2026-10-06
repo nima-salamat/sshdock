@@ -9,9 +9,9 @@ from typing import Callable
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import (
-    QAbstractItemView, QHBoxLayout, QLabel, QLineEdit, QMenu, QPlainTextEdit,
-    QFileDialog, QApplication,
-    QPushButton, QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem,
+    QAbstractItemView, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLineEdit,
+    QListWidget, QListWidgetItem, QMenu, QPlainTextEdit, QFileDialog, QApplication,
+    QInputDialog, QPushButton, QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
 
@@ -156,6 +156,102 @@ class _EditorWorkspace(QWidget):
         self.hide()
 
 
+class _UploadSelectionDialog(QDialog):
+    """Small local picker that can accumulate both files and folders in one upload."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Upload files and folders")
+        self.resize(620, 430)
+        self.selected_paths: list[str] = []
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 14, 14, 12)
+        root.setSpacing(8)
+
+        title = QLabel("Choose files and folders to upload")
+        title.setObjectName("panelTitle")
+        root.addWidget(title)
+
+        self.list = QListWidget()
+        self.list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.list.setAlternatingRowColors(False)
+        root.addWidget(self.list, 1)
+
+        actions = QHBoxLayout()
+        add_files = QPushButton("Add files")
+        add_files.setIcon(self._icon("fa5s.file"))
+        add_files.clicked.connect(self._add_files)
+        add_folder = QPushButton("Add folder")
+        add_folder.setIcon(self._icon("fa5s.folder-open"))
+        add_folder.clicked.connect(self._add_folder)
+        remove = QPushButton("Remove selected")
+        remove.clicked.connect(self._remove_selected)
+        actions.addWidget(add_files)
+        actions.addWidget(add_folder)
+        actions.addWidget(remove)
+        actions.addStretch()
+        root.addLayout(actions)
+
+        self.buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
+        )
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Upload")
+        self.buttons.accepted.connect(self._accept)
+        self.buttons.rejected.connect(self.reject)
+        root.addWidget(self.buttons)
+
+    @staticmethod
+    def _icon(name: str):
+        try:
+            import qtawesome as qta
+            return qta.icon(name)
+        except Exception:
+            return QIcon()
+
+    def _add_paths(self, paths: list[str]):
+        known = {os.path.normcase(os.path.abspath(p)) for p in self.selected_paths}
+        for path in paths:
+            normalized = os.path.abspath(path)
+            key = os.path.normcase(normalized)
+            if key in known:
+                continue
+            known.add(key)
+            self.selected_paths.append(normalized)
+            label = os.path.basename(os.path.normpath(normalized)) or normalized
+            item = QListWidgetItem(label)
+            item.setToolTip(normalized)
+            item.setData(Qt.ItemDataRole.UserRole, normalized)
+            self.list.addItem(item)
+
+    def _add_files(self):
+        files, _ = QFileDialog.getOpenFileNames(self, "Select files to upload")
+        self._add_paths(files)
+
+    def _add_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select folder to upload")
+        if folder:
+            self._add_paths([folder])
+
+    def _remove_selected(self):
+        for item in self.list.selectedItems():
+            row = self.list.row(item)
+            self.list.takeItem(row)
+        self.selected_paths = [
+            self.list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(self.list.count())
+        ]
+
+    def _accept(self):
+        self.selected_paths = [
+            self.list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(self.list.count())
+        ]
+        if not self.selected_paths:
+            return
+        self.accept()
+
+
 class TerminalFileExplorer(QWidget):
     """Compact remote filesystem explorer coupled to one interactive SSH shell."""
 
@@ -182,28 +278,21 @@ class TerminalFileExplorer(QWidget):
         title = QLabel("EXPLORER")
         title.setObjectName("terminalExplorerTitle")
         header.addWidget(title)
-        self.count_label = QLabel("")
-        self.count_label.setObjectName("muted")
-        header.addWidget(self.count_label)
         header.addStretch()
-        # Search replaces the old dedicated parent-directory button. The parent
-        # directory is now represented by a ".." item in the filesystem list.
+        # Search remains a toggle; creation actions live beside it.
         self.search_btn = self._button("fa5s.search", "Search files", self._toggle_search)
         self.search_btn.setCheckable(True)
         self.search_btn.setAutoRaise(True)
-        self.refresh_btn = self._button("fa5s.sync-alt", "Refresh", self.refresh)
-        self.upload_btn = self._button("fa5s.upload", "Upload files here", self.upload_files)
-        self.upload_folder_btn = self._button("fa5s.folder-plus", "Upload folder here", self.upload_folder)
-        self.download_btn = self._button("fa5s.download", "Download selected files/folders", self.download_selected)
+        self.new_folder_btn = self._button("fa5s.folder-plus", "New folder", self.new_folder)
+        self.new_file_btn = self._button("fa5s.file", "New file", self.new_file)
         self.close_btn = self._button("fa5s.times", "Close explorer", self.closed_requested.emit)
         header.addWidget(self.search_btn)
-        header.addWidget(self.refresh_btn)
-        header.addWidget(self.upload_btn)
-        header.addWidget(self.upload_folder_btn)
-        header.addWidget(self.download_btn)
+        header.addWidget(self.new_folder_btn)
+        header.addWidget(self.new_file_btn)
         header.addWidget(self.close_btn)
         root.addLayout(header)
 
+        path_row = QHBoxLayout()
         self.path_label = QLabel("/")
         self.path_label.setObjectName("terminalExplorerPathLabel")
         self.path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -212,7 +301,19 @@ class TerminalFileExplorer(QWidget):
             self.path_label.sizePolicy().horizontalPolicy(),
             self.path_label.sizePolicy().verticalPolicy(),
         )
-        root.addWidget(self.path_label)
+        path_row.addWidget(self.path_label, 1)
+
+        self.count_label = QLabel("")
+        self.count_label.setObjectName("terminalExplorerStatusInline")
+        path_row.addWidget(self.count_label)
+
+        self.refresh_btn = self._button("fa5s.sync-alt", "Refresh", self.refresh)
+        self.upload_btn = self._button("fa5s.upload", "Upload files and folders", self.upload_files)
+        self.download_btn = self._button("fa5s.download", "Download selected files/folders", self.download_selected)
+        path_row.addWidget(self.refresh_btn)
+        path_row.addWidget(self.upload_btn)
+        path_row.addWidget(self.download_btn)
+        root.addLayout(path_row)
 
         self.search = QLineEdit()
         self.search.setObjectName("terminalExplorerSearch")
@@ -298,40 +399,80 @@ class TerminalFileExplorer(QWidget):
         self.status.setText(f"{direction}: {percent}% · {done:,}/{total:,} bytes")
 
     async def upload_files(self):
-        files, _ = QFileDialog.getOpenFileNames(self, "Upload files")
-        if not files:
+        chooser = _UploadSelectionDialog(self)
+        if chooser.exec() != QDialog.DialogCode.Accepted:
             return
+        sources = list(chooser.selected_paths)
+        if not sources:
+            return
+
         ok = 0
-        for local in files:
+        for local in sources:
             try:
-                name = os.path.basename(local)
+                name = os.path.basename(os.path.normpath(local))
                 await self.backend.upload(
                     local,
                     posixpath.join(self.current_path, name),
-                    progress_handler=lambda _src, _dst, done, total: self._transfer_progress("Uploading", done, total),
+                    progress_handler=lambda _src, _dst, done, total: self._transfer_progress(
+                        "Uploading", done, total
+                    ),
                 )
                 ok += 1
             except Exception as exc:
                 self.status.setText(f"Upload failed: {str(exc)[:140]}")
                 break
-        self.status.setText(f"Uploaded {ok}/{len(files)} item(s) to {self.current_path}")
+
+        self.status.setText(f"Uploaded {ok}/{len(sources)} item(s) to {self.current_path}")
         self._show_path()
 
-    async def upload_folder(self):
-        local = QFileDialog.getExistingDirectory(self, "Upload folder")
-        if not local:
+    async def new_folder(self):
+        name, ok = QInputDialog.getText(self, "New folder", "Folder name:")
+        if not ok:
             return
-        name = os.path.basename(os.path.normpath(local))
+        name = name.strip()
+        if not self._valid_child_name(name):
+            self.status.setText("Enter a valid folder name (without /).")
+            return
+        path = posixpath.join(self.current_path, name)
         try:
-            await self.backend.upload(
-                local,
-                posixpath.join(self.current_path, name),
-                progress_handler=lambda _src, _dst, done, total: self._transfer_progress("Uploading", done, total),
-            )
-            self.status.setText(f"Uploaded folder {name}")
+            await self.backend.stat(path)
+            self.status.setText(f"Folder already exists: {name}")
+            return
+        except Exception:
+            pass
+        try:
+            await self.backend.mkdir(path)
+            self.status.setText(f"Created folder {name}")
             self._show_path()
         except Exception as exc:
-            self.status.setText(f"Upload folder failed: {str(exc)[:140]}")
+            self.status.setText(f"Create folder failed: {str(exc)[:140]}")
+
+    async def new_file(self):
+        name, ok = QInputDialog.getText(self, "New file", "File name:")
+        if not ok:
+            return
+        name = name.strip()
+        if not self._valid_child_name(name):
+            self.status.setText("Enter a valid file name (without /).")
+            return
+        path = posixpath.join(self.current_path, name)
+        try:
+            await self.backend.stat(path)
+            self.status.setText(f"File already exists: {name}")
+            return
+        except Exception:
+            pass
+        try:
+            await self.backend.write_text(path, "")
+            self.status.setText(f"Created file {name}")
+            self._show_path()
+            self._spawn(self._open_file(Entry(name=name, path=path, is_dir=False)))
+        except Exception as exc:
+            self.status.setText(f"Create file failed: {str(exc)[:140]}")
+
+    @staticmethod
+    def _valid_child_name(name: str) -> bool:
+        return bool(name) and name not in (".", "..") and "/" not in name and "\\" not in name
 
     async def download_selected(self):
         items = self.tree.selectedItems()
@@ -457,7 +598,7 @@ class TerminalFileExplorer(QWidget):
                 visible += 1
             self._loaded_paths.add(path)
             if path == self.current_path:
-                self.count_label.setText(f"{visible} items")
+                self.count_label.setText(f"{visible} items · shell cwd")
                 self.status.setText(f"{visible} items · shell cwd")
             self._filter()
         except Exception as exc:
@@ -607,8 +748,7 @@ class TerminalFileExplorer(QWidget):
                 download_action = menu.addAction("Download")
             menu.addSeparator()
             copy_action = menu.addAction("Copy path")
-            upload_action = menu.addAction("Upload files here")
-            upload_folder_action = menu.addAction("Upload folder here")
+            upload_action = menu.addAction("Upload files and folders here")
             chosen = menu.exec(self.tree.viewport().mapToGlobal(pos))
             if chosen is open_action:
                 self._activated(item, 0)
@@ -621,12 +761,10 @@ class TerminalFileExplorer(QWidget):
                 self._spawn(self.download_one(data))
             elif chosen is upload_action:
                 self._spawn(self.upload_files())
-            elif chosen is upload_folder_action:
-                self._spawn(self.upload_folder())
         elif isinstance(data, dict) and data.get("dir"):
             cd_action = menu.addAction("cd in terminal")
             copy_action = menu.addAction("Copy path")
-            upload_action = menu.addAction("Upload here")
+            upload_action = menu.addAction("Upload files and folders here")
             chosen = menu.exec(self.tree.viewport().mapToGlobal(pos))
             if chosen is cd_action:
                 self.change_dir(data["path"])
