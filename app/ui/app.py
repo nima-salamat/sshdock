@@ -12,11 +12,13 @@ from app.storage.settings import SettingsStore
 from app.storage.secure import CredentialStore
 from app.ui.dialogs import ConnectionDialog
 from app.ui.main_window import MainWindow
-from app.ui.styles import DARK
+from app.ui.styles import theme_stylesheet
 
 async def async_main(app: QApplication) -> None:
     configure_logging()
-    app.setStyleSheet(DARK)
+    prefs = SettingsStore().load_ui_prefs()
+    app.setProperty("sshdockTheme", str(prefs.get("theme") or "dark").lower())
+    app.setStyleSheet(theme_stylesheet(str(prefs.get("theme") or "dark")))
     # Faster tooltips app-wide (Qt still has a small initial delay; duration is show time)
     try:
         from PySide6.QtWidgets import QToolTip
@@ -28,6 +30,7 @@ async def async_main(app: QApplication) -> None:
 
     store = SettingsStore()
     profiles = store.load_profiles()
+    prefs = store.load_ui_prefs()
     aliases = discover_aliases()
     dialog = ConnectionDialog(profiles, aliases, store=store)
     # Multi-monitor: center on cursor screen / clamp above taskbar (also done in showEvent)
@@ -49,7 +52,6 @@ async def async_main(app: QApplication) -> None:
         profiles.append(profile)
         store.save_profiles(profiles)
 
-    prefs = store.load_ui_prefs()
     manager = SessionManager(
         worker_shell_count=int(prefs.get("worker_shell_count", 3)),
         remote_agent_enabled=bool(prefs.get("remote_agent_enabled", False)),
