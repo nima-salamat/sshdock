@@ -22,8 +22,8 @@ mdocker() {
   fi
   __sshdock_magic "$@"
 }
-m-docker() { mdocker "$@"; }
-magic-docker() { mdocker "$@"; }
+alias m-docker='mdocker'
+alias magic-docker='mdocker'
 
 # Intentionally do not shadow the real docker command.
 # The native docker executable/function remains untouched so existing
