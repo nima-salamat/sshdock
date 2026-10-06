@@ -53,8 +53,8 @@ class RemoteAgentClient:
         if self.connection is None or self.connection.is_closed():
             raise RuntimeError("SSH transport unavailable")
         self.remote_path=f"/tmp/sshdock-agent-{uuid.uuid4().hex[:16]}.py"
-        await self._upload()
         try:
+            await self._upload()
             cmd=("if command -v python3 >/dev/null 2>&1; then exec python3 "
                  +shlex.quote(self.remote_path)+
                  " --port 0; elif command -v python >/dev/null 2>&1; then exec python "
