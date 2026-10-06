@@ -71,17 +71,21 @@ alias mconfig='mdocker config ls'
 """
 
 
-def install_command() -> str:
+def install_command(*, manage_echo: bool = True) -> str:
+    """Return the shell command used to install the mdocker integration.
+
+    When the caller already disabled PTY echo, ``manage_echo=False`` prevents
+    the long base64 payload from being echoed by the remote shell.
+    """
     b64 = base64.b64encode(DOCKER_PRETTY_SH.encode("utf-8")).decode("ascii")
-    return (
-        "stty -echo 2>/dev/null; "
+    command = (
         f"echo '{b64}' | (base64 -d 2>/dev/null || base64 --decode 2>/dev/null) "
         "> /tmp/.sshdock_docker.sh 2>/dev/null && "
-        ". /tmp/.sshdock_docker.sh 2>/dev/null; "
-        "stty echo 2>/dev/null; "
-        "printf '\\r\\033[K'"
+        ". /tmp/.sshdock_docker.sh 2>/dev/null"
     )
-
+    if manage_echo:
+        return "stty -echo 2>/dev/null; " + command + "; stty echo 2>/dev/null; printf '\\r\\033[K'"
+    return command
 
 def parse_magic_kind(payload: str) -> str | None:
     """Map mdocker / docker --magic argv to a results-table kind.
