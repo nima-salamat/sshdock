@@ -44,27 +44,16 @@ class _EditorWorkspace(QWidget):
         self.tabs.setDocumentMode(True)
         self.tabs.setMovable(True)
         self.tabs.tabCloseRequested.connect(self._close_tab)
-        self.tabs.setStyleSheet(
-            """
-            QTabWidget::pane { border: none; background: #0d1117; }
-            QTabBar::tab {
-                background: #161b22; color: #8b949e;
-                padding: 8px 14px; margin-right: 1px;
-                border-top-left-radius: 6px; border-top-right-radius: 6px;
-            }
-            QTabBar::tab:selected { background: #0d1117; color: #e6edf3; }
-            QTabBar::tab:hover:!selected { background: #1c2128; color: #c9d1d9; }
-            """
-        )
+        self.setObjectName("editorWorkspace")
+        self.tabs.setObjectName("editorTabs")
         root.addWidget(self.tabs, 1)
 
         foot = QHBoxLayout()
         foot.setContentsMargins(10, 4, 10, 6)
         self.global_status = QLabel("")
-        self.global_status.setStyleSheet("color:#8b949e;")
+        self.global_status.setObjectName("editorStatus")
         foot.addWidget(self.global_status, 1)
         root.addLayout(foot)
-        self.setStyleSheet("background:#0d1117; color:#e6edf3;")
 
     def open_file(self, path: str, content: str, *, writable: bool = True):
         if path in self._tabs:
@@ -84,17 +73,13 @@ class _EditorWorkspace(QWidget):
         toolbar = QHBoxLayout()
         toolbar.setContentsMargins(10, 6, 10, 6)
         path_lbl = QLabel(path)
-        path_lbl.setStyleSheet("color:#8b949e;")
+        path_lbl.setObjectName("editorPath")
         path_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         toolbar.addWidget(path_lbl, 1)
         save_btn = None
         if writable:
             save_btn = QPushButton("Save")
-            save_btn.setStyleSheet(
-                "QPushButton { background:#238636; color:white; border:none; "
-                "padding:5px 14px; border-radius:6px; font-weight:600; }"
-                "QPushButton:hover { background:#2ea043; }"
-            )
+            save_btn.setObjectName("editorSaveButton")
             toolbar.addWidget(save_btn)
         lay.addLayout(toolbar)
 
@@ -107,15 +92,12 @@ class _EditorWorkspace(QWidget):
             font = QFont("Consolas")
         font.setPointSize(13)
         view.setFont(font)
-        view.setStyleSheet(
-            "QPlainTextEdit { background:#0d1117; color:#e6edf3; border:none; "
-            "selection-background-color:#264f78; }"
-        )
+        view.setObjectName("editorView")
         CodeHighlighter(view.document(), CodeHighlighter.language_for_path(path), path=path)
         lay.addWidget(view, 1)
 
         status = QLabel("Ready" if writable else "Read-only")
-        status.setStyleSheet("color:#8b949e;")
+        status.setObjectName("editorStatus")
         status.setContentsMargins(10, 2, 10, 6)
         lay.addWidget(status)
 
