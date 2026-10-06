@@ -5,7 +5,7 @@ import posixpath
 from typing import Callable
 
 from PySide6.QtCore import Qt, QSize, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView, QHBoxLayout, QLabel, QLineEdit, QMenu, QPlainTextEdit,
     QFileDialog,
@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from app.files.browser import Entry, ServerFileBackend
 from app.files.highlighter import CodeHighlighter
+from app.files.file_types import classify, color_for
 
 
 class _EditorWorkspace(QWidget):
@@ -243,6 +244,13 @@ class TerminalFileExplorer(QWidget):
         b.clicked.connect(lambda _=False: callback())
         return b
 
+    def _icon_for(self, icon_name: str, color: str):
+        try:
+            import qtawesome as qta
+            return qta.icon(icon_name, color=color)
+        except Exception:
+            return QIcon()
+    
     def apply_theme(self, theme: str | None = None) -> None:
         name = str(theme or QApplication.instance().property("sshdockTheme") or "dark").lower()
         try:
@@ -360,11 +368,17 @@ class TerminalFileExplorer(QWidget):
             for ent in entries:
                 if ent.is_dir:
                     child = self._make_dir_item(ent.path, display=ent.name)
+                    theme = str(QApplication.instance().property("sshdockTheme") or "dark").lower()
+                    ft = classify(ent.name, is_dir=True)
+                    child.setIcon(0, self._icon_for(ft.icon, color_for(ft.key, theme)))
                     item.addChild(child)
                 else:
                     child = QTreeWidgetItem([ent.name])
                     child.setData(0, Qt.ItemDataRole.UserRole, ent)
                     child.setToolTip(0, ent.path)
+                    theme = str(QApplication.instance().property("sshdockTheme") or "dark").lower()
+                    ft = classify(ent.name)
+                    child.setIcon(0, self._icon_for(ft.icon, color_for(ft.key, theme)))
                     child.setChildIndicatorPolicy(
                         QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicator
                     )
