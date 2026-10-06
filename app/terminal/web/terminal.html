@@ -449,12 +449,28 @@
             console.error('showTable', e);
           }
         },
+        fit: function () {
+          try {
+            if (fitAddon) {
+              fitAddon.fit();
+            }
+          } catch (e) {}
+          try {
+            if (window._sshdockSync) {
+              window._sshdockSync();
+              requestAnimationFrame(window._sshdockSync);
+            }
+          } catch (e) {}
+          reportSize();
+        },
+
         hideTable: function () {
-          const block = document.getElementById('sshdock-result-block');
-          if (block) {
-            block.classList.remove('visible');
-            block.style.visibility = 'hidden';
+          const blocks = window._sshdockTbls || [];
+          for (let i = 0; i < blocks.length; i++) {
+            const block = blocks[i];
+            if (block && block.parentNode) block.parentNode.removeChild(block);
           }
+          window._sshdockTbls = [];
         },
 
 
