@@ -666,15 +666,14 @@ class SecureKeyPreviewDialog(QDialog):
         lock.setStyleSheet("font-size:22px;")
         header.addWidget(lock)
         title = QLabel("Private key preview")
-        title.setStyleSheet("font-size:16px; font-weight:700; color:#f1f5f9;")
+        title.setObjectName("secureTitle")
+        title.setStyleSheet("font-size:16px; font-weight:700;")
         header.addWidget(title)
         header.addStretch()
         if self._source_label:
             src = QLabel(self._source_label)
-            src.setStyleSheet(
-                "color:#9fb0c3; font-size:11px; padding:4px 10px;"
-                "background:#1a222c; border:1px solid #2a3340; border-radius:10px;"
-            )
+            src.setObjectName("secureSource")
+            src.setStyleSheet("font-size:11px; padding:4px 10px; border-radius:10px;")
             header.addWidget(src)
         root.addLayout(header)
 
@@ -683,13 +682,7 @@ class SecureKeyPreviewDialog(QDialog):
         self._banner = QLabel("Verifying screenshot protection…")
         self._banner.setWordWrap(True)
         self._banner.setObjectName("secureBanner")
-        self._banner.setStyleSheet(
-            "#secureBanner {"
-            "  padding:8px 12px; border-radius:8px;"
-            "  background:#231b08; color:#ffca4b;"
-            "  border:1px solid #4a3a14; font-size:12px;"
-            "}"
-        )
+        self._banner.setProperty("state", "pending")
         root.addWidget(self._banner)
 
         # ── Key contents ──
@@ -701,13 +694,7 @@ class SecureKeyPreviewDialog(QDialog):
         mono.setPointSize(10)
         self._editor.setFont(mono)
         self._editor.setObjectName("keyPreview")
-        self._editor.setStyleSheet(
-            "#keyPreview {"
-            "  background:#0a0d12; color:#c8d3e0;"
-            "  border:1px solid #2a3340; border-radius:8px;"
-            "  padding:10px;"
-            "}"
-        )
+        self._editor.setStyleSheet("")
         root.addWidget(self._editor, 1)
 
         # ── Footer ──
@@ -728,19 +715,42 @@ class SecureKeyPreviewDialog(QDialog):
         footer.addWidget(close_btn)
         root.addLayout(footer)
 
-    @staticmethod
-    def _qss() -> str:
-        return (
-            "QDialog { background:#0f1318; }"
-            "QPushButton { background:#1a222c; border:1px solid #2c3542;"
-            "              border-radius:8px; color:#dbe3ee; padding:7px 14px;"
-            "              font-weight:600; }"
-            "QPushButton:hover { background:#222b36; border-color:#3b4656; }"
-            "QPushButton[accent=true] { background:#1d6fe8; border-color:#1a62ce;"
-            "                           color:#fff; padding:8px 18px;"
-            "                           font-weight:700; }"
-            "QPushButton[accent=true]:hover { background:#2b7cf0; }"
-        )
+    @classmethod
+    def _qss(cls) -> str:
+        light = str(QApplication.instance().property("sshdockTheme") or "dark").lower() == "light"
+        if light:
+            return """
+            QDialog { background:#f4f6f9; color:#1e293b; }
+            #secureTitle { color:#0f172a; }
+            #secureSource { color:#475569; background:#ffffff; border:1px solid #cbd5e1; }
+            #secureBanner { padding:8px 12px; border-radius:8px; background:#fffbeb; color:#a16207; border:1px solid #fde68a; font-size:12px; }
+            #secureBanner[state="success"] { background:#f0fdf4; color:#15803d; border-color:#bbf7d0; }
+            #secureBanner[state="warning"] { background:#fef2f2; color:#b91c1c; border-color:#fecaca; }
+            #keyPreview { background:#ffffff; color:#1e293b; border:1px solid #cbd5e1; border-radius:8px; padding:10px; }
+            #secureHint { color:#64748b; }
+            #lineCount { color:#64748b; }
+            QPushButton { background:#e2e8f0; border:1px solid #cbd5e1; border-radius:8px; color:#1e293b; padding:7px 14px; font-weight:600; }
+            QPushButton:hover { background:#cbd5e1; border-color:#94a3b8; }
+            QPushButton[accent=true] { background:#2563eb; border-color:#1d4ed8; color:#ffffff; padding:8px 18px; font-weight:700; }
+            QPushButton[accent=true]:hover { background:#1d4ed8; }
+            QCheckBox { color:#334155; }
+            """
+        return """
+        QDialog { background:#0f1318; color:#e9edf2; }
+        #secureTitle { color:#f1f5f9; }
+        #secureSource { color:#9fb0c3; background:#1a222c; border:1px solid #2a3340; }
+        #secureBanner { padding:8px 12px; border-radius:8px; background:#231b08; color:#ffca4b; border:1px solid #4a3a14; font-size:12px; }
+        #secureBanner[state="success"] { background:#0d2818; color:#41d17d; border-color:#1d5a36; }
+        #secureBanner[state="warning"] { background:#2a181c; color:#ff939b; border-color:#5a3036; }
+        #keyPreview { background:#0a0d12; color:#c8d3e0; border:1px solid #2a3340; border-radius:8px; padding:10px; }
+        #secureHint { color:#9fb0c3; }
+        #lineCount { color:#8a95a4; }
+        QPushButton { background:#1a222c; border:1px solid #2c3542; border-radius:8px; color:#dbe3ee; padding:7px 14px; font-weight:600; }
+        QPushButton:hover { background:#222b36; border-color:#3b4656; }
+        QPushButton[accent=true] { background:#1d6fe8; border-color:#1a62ce; color:#fff; padding:8px 18px; font-weight:700; }
+        QPushButton[accent=true]:hover { background:#2b7cf0; }
+        QCheckBox { color:#c5d0de; }
+        """
 
     # ── Screenshot protection ──
     def showEvent(self, event) -> None:
@@ -766,13 +776,9 @@ class SecureKeyPreviewDialog(QDialog):
                     "⚠ " + note + "  ·  Treat this preview as visible to any "
                     "screen-recording tool on this machine."
                 )
-                self._banner.setStyleSheet(
-                    "#secureBanner {"
-                    "  padding:8px 12px; border-radius:8px;"
-                    "  background:#2a181c; color:#ff939b;"
-                    "  border:1px solid #5a3036; font-size:12px;"
-                    "}"
-                )
+                self._banner.setProperty("state", "warning")
+                self._banner.style().unpolish(self._banner)
+                self._banner.style().polish(self._banner)
 
     # ── Clipboard hygiene ──
     def _copy_with_autoclear(self) -> None:
@@ -838,7 +844,8 @@ class PastePrivateKeyDialog(QDialog):
         root.setSpacing(10)
 
         title = QLabel("Paste private key")
-        title.setStyleSheet("font-size:15px; font-weight:700; color:#f1f5f9;")
+        title.setObjectName("secureTitle")
+        title.setStyleSheet("font-size:15px; font-weight:700;")
         root.addWidget(title)
 
         hint = QLabel(
@@ -848,7 +855,8 @@ class PastePrivateKeyDialog(QDialog):
             "will only show that a key has been pasted (never its contents)."
         )
         hint.setWordWrap(True)
-        hint.setStyleSheet("color:#9fb0c3; font-size:12px;")
+        hint.setObjectName("secureHint")
+        hint.setStyleSheet("font-size:12px;")
         root.addWidget(hint)
 
         # Editable area with show/hide toggle.
@@ -866,12 +874,8 @@ class PastePrivateKeyDialog(QDialog):
         mono.setStyleHint(QFont.StyleHint.Monospace)
         mono.setPointSize(10)
         self._editor.setFont(mono)
-        self._editor.setStyleSheet(
-            "QPlainTextEdit {"
-            "  background:#0a0d12; color:#c8d3e0;"
-            "  border:1px solid #2a3340; border-radius:8px; padding:10px;"
-            "}"
-        )
+        self._editor.setObjectName("keyPreview")
+        self._editor.setStyleSheet("")
         if existing:
             self._editor.setPlainText(existing)
         root.addWidget(self._editor, 1)
@@ -885,7 +889,8 @@ class PastePrivateKeyDialog(QDialog):
         show_row.addWidget(self._show_cb)
         show_row.addStretch()
         self._line_count = QLabel("0 lines")
-        self._line_count.setStyleSheet("color:#8a95a4; font-size:11px;")
+        self._line_count.setObjectName("lineCount")
+        self._line_count.setStyleSheet("font-size:11px;")
         show_row.addWidget(self._line_count)
         self._editor.textChanged.connect(self._update_line_count)
         root.addLayout(show_row)
@@ -913,9 +918,9 @@ class PastePrivateKeyDialog(QDialog):
         # this is a UI affordance, not a security boundary.)
         pal = self._editor.palette()
         if show:
-            pal.setColor(QPalette.ColorRole.Text, QColor("#c8d3e0"))
+            pal.setColor(QPalette.ColorRole.Text, self._editor.palette().color(QPalette.ColorRole.Text))
         else:
-            pal.setColor(QPalette.ColorRole.Text, QColor("#0a0d12"))
+            pal.setColor(QPalette.ColorRole.Text, self._editor.palette().color(QPalette.ColorRole.Base))
         self._editor.setPalette(pal)
         self._editor.viewport().update()
 
@@ -1284,87 +1289,75 @@ class ConnectionDialog(QDialog):
         self.list.currentItemChanged.connect(self._profile_selected)
         self.list.itemDoubleClicked.connect(self._on_list_double_clicked)
 
-    @staticmethod
-    def _dialog_qss() -> str:
+    @classmethod
+    def _dialog_qss(cls) -> str:
+        light = str(QApplication.instance().property("sshdockTheme") or "dark").lower() == "light"
+        if light:
+            return """
+            QDialog { background:#f4f6f9; color:#1e293b; }
+            #railLabel { color:#64748b; font-size:10px; font-weight:700; letter-spacing:0.8px; }
+            #connTree { background:#ffffff; border:1px solid #d5dbe6; border-radius:10px; padding:6px; outline:0; color:#1e293b; }
+            #connTree::item { padding:6px 8px; border-radius:6px; }
+            #connTree::item:selected { background:#dbeafe; color:#0f172a; }
+            #connTree::item:hover { background:#eef2f7; }
+            #heroBanner { background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #eff6ff,stop:1 #f8fafc); border:1px solid #bfdbfe; border-radius:12px; }
+            #formHero { font-size:18px; font-weight:700; color:#0f172a; }
+            #formSub { color:#64748b; font-size:12px; }
+            #card,#cardMuted { background:#ffffff; border:1px solid #d5dbe6; border-radius:12px; }
+            #cardMuted { background:#f8fafc; }
+            #ghostBtn,#ghostBtnDanger,#secondaryBtn { background:#e2e8f0; border:1px solid #cbd5e1; border-radius:8px; color:#1e293b; padding:6px 12px; font-weight:600; }
+            #ghostBtn:hover,#secondaryBtn:hover { background:#cbd5e1; border-color:#94a3b8; }
+            #ghostBtnDanger { color:#b91c1c; }
+            #ghostBtnDanger:hover { background:#fee2e2; border-color:#fca5a5; }
+            #primaryBtn { background:#2563eb; border:1px solid #1d4ed8; border-radius:8px; color:#ffffff; padding:8px 18px; font-weight:700; }
+            #primaryBtn:hover { background:#1d4ed8; }
+            #advToggle { background:transparent; border:0; color:#2563eb; font-weight:600; padding:2px 0; font-size:12px; }
+            #advToggle:hover { color:#1d4ed8; }
+            #connectFooter { background:#ffffff; border-top:1px solid #d5dbe6; border-radius:8px; }
+            #statusHint { color:#64748b; font-size:11px; }
+            QLineEdit,QSpinBox,QComboBox { background:#ffffff; border:1px solid #cbd5e1; border-radius:8px; padding:7px 10px; color:#1e293b; min-height:18px; }
+            QLineEdit:focus,QSpinBox:focus,QComboBox:focus { border-color:#3b82f6; }
+            QCheckBox { color:#334155; spacing:8px; }
+            QToolButton#eyeToggle { background:transparent; border:0; border-radius:4px; padding:0; margin:0 4px 0 0; }
+            QToolButton#eyeToggle:hover { background:#e2e8f0; }
+            #keyStatusChip { background:#f8fafc; border:1px solid #cbd5e1; border-radius:10px; color:#64748b; font-size:11px; font-weight:600; padding:5px 12px; }
+            #keyStatusChip[state="file"] { background:#f0fdf4; border-color:#bbf7d0; color:#15803d; }
+            #keyStatusChip[state="pasted"] { background:#eff6ff; border-color:#bfdbfe; color:#2563eb; }
+            #keyStatusChip[state="encrypted"] { background:#fef2f2; border-color:#fecaca; color:#b91c1c; }
+            """
         return """
-        QDialog { background: #0f1318; }
-        #railLabel {
-            color: #66717f; font-size: 10px; font-weight: 700; letter-spacing: 0.8px;
-        }
-        #connTree {
-            background: #0e1218; border: 1px solid #252c36; border-radius: 10px;
-            padding: 6px; outline: 0;
-        }
-        #connTree::item { padding: 6px 8px; border-radius: 6px; }
-        #connTree::item:selected { background: #1d6fe8; color: #fff; }
-        #connTree::item:hover { background: #1a222c; }
-
-        /* Hero banner — gradient accent strip + icon for visual polish */
-        #heroBanner {
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                stop:0 #15243a, stop:1 #1a2230);
-            border: 1px solid #243a5c;
-            border-radius: 12px;
-        }
-        #formHero { font-size: 18px; font-weight: 700; color: #f1f5f9; }
-        #formSub { color: #9fb0c3; font-size: 12px; }
-
-        #card, #cardMuted {
-            background: #151a21; border: 1px solid #252c36; border-radius: 12px;
-        }
-        #cardMuted { background: #10151b; }
-        #ghostBtn, #ghostBtnDanger, #secondaryBtn {
-            background: #1a222c; border: 1px solid #2c3542; border-radius: 8px;
-            color: #dbe3ee; padding: 6px 12px; font-weight: 600;
-        }
-        #ghostBtn:hover, #secondaryBtn:hover { background: #222b36; border-color: #3b4656; }
-        #ghostBtnDanger { color: #ffb4b9; }
-        #ghostBtnDanger:hover { background: #2a181c; border-color: #5a3036; }
-        #primaryBtn {
-            background: #1d6fe8; border: 1px solid #1a62ce; border-radius: 8px;
-            color: #fff; padding: 8px 18px; font-weight: 700;
-        }
-        #primaryBtn:hover { background: #2b7cf0; }
-        #advToggle {
-            background: transparent; border: 0; color: #8ab4ff;
-            font-weight: 600; padding: 2px 0; font-size: 12px;
-        }
-        #advToggle:hover { color: #b3d0ff; }
-        #connectFooter {
-            background: #0c1015; border-top: 1px solid #252c36;
-            border-radius: 8px;
-        }
-        #statusHint { color: #8a95a4; font-size: 11px; }
-        QLineEdit, QSpinBox, QComboBox {
-            background: #0e1218; border: 1px solid #2a3340; border-radius: 8px;
-            padding: 7px 10px; color: #e8eef6; min-height: 18px;
-        }
-        QLineEdit:focus, QSpinBox:focus, QComboBox:focus { border-color: #3b82f6; }
-        QCheckBox { color: #c5d0de; spacing: 8px; }
-
-        /* Eye toggle button inside _SecretLineEdit */
-        QToolButton#eyeToggle {
-            background: transparent; border: 0; border-radius: 4px;
-            padding: 0; margin: 0 4px 0 0;
-        }
-        QToolButton#eyeToggle:hover { background: #1d2530; }
-
-        /* Key status chip — gives feedback without revealing content */
-        #keyStatusChip {
-            background: #10151b; border: 1px solid #2a3340; border-radius: 10px;
-            color: #8a95a4; font-size: 11px; font-weight: 600;
-            padding: 5px 12px;
-        }
-        #keyStatusChip[state="file"] {
-            background: #0d2818; border-color: #1d5a36; color: #41d17d;
-        }
-        #keyStatusChip[state="pasted"] {
-            background: #0d2230; border-color: #1d4f6e; color: #5fb8ff;
-        }
-        #keyStatusChip[state="encrypted"] {
-            background: #2a181c; border-color: #5a3036; color: #ff939b;
-        }
+        QDialog { background:#0f1318; color:#e9edf2; }
+        #railLabel { color:#66717f; font-size:10px; font-weight:700; letter-spacing:0.8px; }
+        #connTree { background:#0e1218; border:1px solid #252c36; border-radius:10px; padding:6px; outline:0; color:#e9edf2; }
+        #connTree::item { padding:6px 8px; border-radius:6px; }
+        #connTree::item:selected { background:#1d6fe8; color:#fff; }
+        #connTree::item:hover { background:#1a222c; }
+        #heroBanner { background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #15243a,stop:1 #1a2230); border:1px solid #243a5c; border-radius:12px; }
+        #formHero { font-size:18px; font-weight:700; color:#f1f5f9; }
+        #formSub { color:#9fb0c3; font-size:12px; }
+        #card,#cardMuted { background:#151a21; border:1px solid #252c36; border-radius:12px; }
+        #cardMuted { background:#10151b; }
+        #ghostBtn,#ghostBtnDanger,#secondaryBtn { background:#1a222c; border:1px solid #2c3542; border-radius:8px; color:#dbe3ee; padding:6px 12px; font-weight:600; }
+        #ghostBtn:hover,#secondaryBtn:hover { background:#222b36; border-color:#3b4656; }
+        #ghostBtnDanger { color:#ffb4b9; }
+        #ghostBtnDanger:hover { background:#2a181c; border-color:#5a3036; }
+        #primaryBtn { background:#1d6fe8; border:1px solid #1a62ce; border-radius:8px; color:#fff; padding:8px 18px; font-weight:700; }
+        #primaryBtn:hover { background:#2b7cf0; }
+        #advToggle { background:transparent; border:0; color:#8ab4ff; font-weight:600; padding:2px 0; font-size:12px; }
+        #advToggle:hover { color:#b3d0ff; }
+        #connectFooter { background:#0c1015; border-top:1px solid #252c36; border-radius:8px; }
+        #statusHint { color:#8a95a4; font-size:11px; }
+        QLineEdit,QSpinBox,QComboBox { background:#0e1218; border:1px solid #2a3340; border-radius:8px; padding:7px 10px; color:#e8eef6; min-height:18px; }
+        QLineEdit:focus,QSpinBox:focus,QComboBox:focus { border-color:#3b82f6; }
+        QCheckBox { color:#c5d0de; spacing:8px; }
+        QToolButton#eyeToggle { background:transparent; border:0; border-radius:4px; padding:0; margin:0 4px 0 0; }
+        QToolButton#eyeToggle:hover { background:#1d2530; }
+        #keyStatusChip { background:#10151b; border:1px solid #2a3340; border-radius:10px; color:#8a95a4; font-size:11px; font-weight:600; padding:5px 12px; }
+        #keyStatusChip[state="file"] { background:#0d2818; border-color:#1d5a36; color:#41d17d; }
+        #keyStatusChip[state="pasted"] { background:#0d2230; border-color:#1d4f6e; color:#5fb8ff; }
+        #keyStatusChip[state="encrypted"] { background:#2a181c; border-color:#5a3036; color:#ff939b; }
         """
+
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
