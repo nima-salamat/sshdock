@@ -105,20 +105,38 @@ class TerminalSession(QObject):
             await asyncio.sleep(0.04)
             # Clear the prompt produced after the stty command.
             await asyncio.wait_for(
-                self.channel.write(b"printf '\\r\\033[K'\\r"),
+                self.channel.write(b"printf '\r\033[K'\r"),
                 timeout=2.0,
             )
             await asyncio.sleep(0.02)
+        except Exception:
+            if echo_disabled:
+                try:
+                    await asyncio.wait_for(
+                        self.channel.write(b"stty echo 2>/dev/null; printf '\r\033[K'\r"),
+                        timeout=2.0,
+                    )
+                except Exception:
+                    pass
+            return
+
+        # Keep prompt decoration separate from mdocker installation. A setup
+        # failure must never prevent the magic command support from loading.
+        try:
             await asyncio.wait_for(
                 self.channel.write((setup + "\r").encode("utf-8")),
-                timeout=2.5,
+                timeout=4.0,
             )
+        except Exception:
+            pass
+
+        try:
             from app.terminal.docker_pretty import install_command
-            pretty = install_command(manage_echo=False) + "\r"
+            pretty = install_command(manage_echo=not echo_disabled) + "\r"
             await asyncio.sleep(0.05)
             await asyncio.wait_for(
                 self.channel.write(pretty.encode("utf-8")),
-                timeout=3.0,
+                timeout=4.0,
             )
         except Exception:
             if echo_disabled:
@@ -129,6 +147,7 @@ class TerminalSession(QObject):
                     )
                 except Exception:
                     pass
+
     def _extract_cwd(self, data: bytes) -> bytes:
         """Parse OSC 7 (cwd) + OSC 777 magic; strip magic from stream."""
         blob = self._osc_buf + data
