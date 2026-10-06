@@ -52,3 +52,19 @@ def test_terminal_close_has_no_obsolete_bootstrap_cleanup_path():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     assert "_cleanup_bootstrap" not in src
     assert "_bootstrap_path" not in src
+
+
+def test_terminal_has_dedicated_scrollbar_gutter():
+    src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    assert "padding: 4px 16px 4px 4px" in src
+    assert 'id="sshdock-scrollbar"' in src
+    assert "scrollbar-width: none" in src
+    assert "scrollViewportToRatio" in src
+    assert "term._core.viewport.scrollBarWidth = 0" in src
+
+
+def test_virtual_table_uses_xterm_marker_for_resize_reflow():
+    src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    assert "term.registerMarker(0)" in src
+    assert "b._anchorMarker" in src
+    assert "b._anchorMarker.dispose()" in src
