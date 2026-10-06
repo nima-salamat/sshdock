@@ -75,10 +75,10 @@ def test_terminal_bootstrap_disables_echo_before_payload():
     assert 'echo_disabled = True' in src
     stty_pos = src.index('stty -echo 2>/dev/null')
     setup_pos = src.index('self.channel.write((setup +')
-    payload_pos = src.index('install_command(manage_echo=False)')
+    payload_pos = src.index('install_command(manage_echo=not echo_disabled)')
     assert stty_pos < setup_pos < payload_pos
     assert 'self.channel.write((setup + "\\r").encode("utf-8"))' in src
-    assert 'pretty = install_command(manage_echo=False) + "\\r"' in src
+    assert 'pretty = install_command(manage_echo=not echo_disabled) + "\\r"' in src
     assert "manage_echo: bool = True" in docker
     assert 'return command' in docker
 
