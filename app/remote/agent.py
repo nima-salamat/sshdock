@@ -41,6 +41,8 @@ class RemoteAgentClient:
         self.remote_path=None
         self.remote_port=None
         self.local_port=None
+        self.token=None
+        self._startup_stage="idle"
         self._reader_task=None
         self._write_lock=asyncio.Lock()
         self._pending={}
@@ -52,14 +54,15 @@ class RemoteAgentClient:
         return not self._closed and self.writer is not None and self.listener is not None and self.process is not None
 
     async def start(self):
-        if self.connected: return
+        if self.connected:
+            return
         self._closed=False
         self.connection=self.ssh.connection
         if self.connection is None or self.connection.is_closed():
             raise RuntimeError("SSH transport unavailable")
         self.remote_path=f"/tmp/sshdock-agent-{uuid.uuid4().hex[:16]}.py"
+        self._startup_stage="python-probe"
         try:
-            await self._upload()
             probe = await self.ssh.run_fast(
                 "command -v python3 || command -v python || true",
                 timeout=3,
@@ -67,23 +70,65 @@ class RemoteAgentClient:
             python_bin = (probe.stdout or "").strip().splitlines()[0] if probe.stdout else ""
             if not python_bin:
                 raise RuntimeError("SSHDock remote agent requires Python 3 on the server")
+
+            self._startup_stage="bootstrap-upload"
+            await self._upload()
+
+            self._startup_stage="agent-process"
             cmd = f"exec {shlex.quote(python_bin)} -u {shlex.quote(self.remote_path)} --port 0"
-            self.process=await self.connection.create_process(cmd,encoding="utf-8",errors="replace")
-            line=await asyncio.wait_for(self.process.stdout.readline(),4)
-            if not line: raise RuntimeError("remote agent exited before handshake")
-            hello=json.loads(line)
-            if int(hello.get("protocol",0))!=PROTOCOL: raise RuntimeError("remote agent protocol mismatch")
+            self.process=await self.connection.create_process(
+                cmd,encoding="utf-8",errors="replace"
+            )
+            try:
+                line=await asyncio.wait_for(self.process.stdout.readline(),4)
+            except asyncio.TimeoutError as exc:
+                err=""
+                try:
+                    err=await asyncio.wait_for(self.process.stderr.read(4096),0.25)
+                except Exception:
+                    pass
+                detail=err.strip() if err else "no handshake received"
+                raise RuntimeError(f"remote agent handshake timeout: {detail}") from exc
+            if not line:
+                err=""
+                try:
+                    err=(await asyncio.wait_for(self.process.stderr.read(4096),0.25)).strip()
+                except Exception:
+                    pass
+                raise RuntimeError(f"remote agent exited before handshake{': '+err if err else ''}")
+            try:
+                hello=json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"invalid remote agent handshake: {line[:300]!r}") from exc
+            if int(hello.get("protocol",0))!=PROTOCOL:
+                raise RuntimeError("remote agent protocol mismatch")
             self.remote_port=int(hello["port"])
-            if not (1<=self.remote_port<=65535): raise RuntimeError("remote agent returned invalid port")
+            if not (1<=self.remote_port<=65535):
+                raise RuntimeError("remote agent returned invalid port")
             self.token=str(hello["token"])
-            self.listener=await self.connection.forward_local_port("127.0.0.1",0,"127.0.0.1",self.remote_port)
+
+            self._startup_stage="ssh-forward"
+            self.listener=await self.connection.forward_local_port(
+                "127.0.0.1",0,"127.0.0.1",self.remote_port
+            )
             self.local_port=int(self.listener.get_port())
-            self.reader,self.writer=await asyncio.wait_for(asyncio.open_connection("127.0.0.1",self.local_port),4)
-            self._reader_task=create_task(self._reader_loop(),name="remote-agent-reader",owner="remote-agent")
-            await self.request("hello",{"protocol":PROTOCOL,"token":self.token},timeout=4)
-        except Exception:
+
+            self._startup_stage="rpc-connect"
+            self.reader,self.writer=await asyncio.wait_for(
+                asyncio.open_connection("127.0.0.1",self.local_port),4
+            )
+            self._reader_task=create_task(
+                self._reader_loop(),name="remote-agent-reader",owner="remote-agent"
+            )
+            self._startup_stage="rpc-auth"
+            await self.request(
+                "hello",{"protocol":PROTOCOL,"token":self.token},timeout=4
+            )
+            self._startup_stage="ready"
+        except Exception as exc:
+            stage=self._startup_stage
             await self.close()
-            raise
+            raise RuntimeError(f"Remote agent startup failed during {stage}: {exc!r}") from exc
 
     async def _upload(self):
         src=Path(__file__).with_name("server.py").read_text(encoding="utf-8")
@@ -164,7 +209,7 @@ class RemoteAgentClient:
                     await asyncio.wait_for(self.connection.run("rm -f "+shlex.quote(self.remote_path),check=False),2.0)
                 except Exception: pass
             self._reject(RuntimeError("remote agent closed"))
-            self.remote_path=None; self.remote_port=None; self.local_port=None
+            self.remote_path=None; self.remote_port=None; self.local_port=None; self.token=None; self._startup_stage="closed"
 
     def _reject(self,exc):
         for fut in tuple(self._pending.values()):
