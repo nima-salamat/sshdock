@@ -3616,16 +3616,21 @@ class MainWindow(QMainWindow):
     async def _create_terminal(self, title=None, command=None):
         if not self.current_id:
             return
-        # A fast double-click can otherwise schedule two coroutines before the
-        # first open_terminal() finishes and adds its session to self.terms.
+        # Guard the whole asynchronous creation, not just the UI click, so
+        # concurrent requests cannot race before SessionManager registers a session.
         if self._terminal_creation_in_progress:
             return
         self._terminal_creation_in_progress = True
         try:
-            server_id = self.current_id
-            title = self._unique_terminal_title(title or f"Terminal {len(self.terms) + 1}")
+            await self._create_terminal_impl(title=title, command=command)
+        finally:
+            self._terminal_creation_in_progress = False
 
-            page = QWidget()
+    async def _create_terminal_impl(self, title=None, command=None):
+        server_id = self.current_id
+        title = self._unique_terminal_title(title or f"Terminal {len(self.terms) + 1}")
+
+        page = QWidget()
         page_layout = QVBoxLayout(page)
         page_layout.setContentsMargins(0, 0, 0, 0)
         page_layout.setSpacing(0)
@@ -3708,8 +3713,6 @@ class MainWindow(QMainWindow):
             term.show_message(f"\n\x1b[31mSSH terminal failed to start:\x1b[0m {exc}\n")
             self.statusBar().showMessage(f"Terminal failed: {exc}", 10000)
             log.exception("Terminal creation failed")
-        finally:
-            self._terminal_creation_in_progress = False
 
     def _terminal_cwd_changed(self, sid: str, path: str):
         """Shell → explorer: keep session.cwd and live-sync the visible explorer."""
