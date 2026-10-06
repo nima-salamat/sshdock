@@ -69,6 +69,10 @@ QTabBar::tab:selected { background:#1d6fe8; color:#fff; }
 #terminalToolbar { background:#101419; border-bottom:1px solid #252b33; min-height:30px; }
 #terminalToolbar QToolButton, #terminalToolbar QPushButton { min-height:26px; max-height:28px; padding:2px 7px; border-radius:5px; }
 #terminalToolbarStatus { color:#93a1b1; font-size:11px; padding-left:6px; }
+#autoRefreshLabel { color:#93a1b1; font-size:11px; }
+QWidget#autoRefreshControl { background:transparent; }
+QComboBox#autoRefreshCombo { min-height:28px; max-height:30px; min-width:104px; padding:4px 8px; }
+
 QStatusBar { background:#11151a; color:#768291; border-top:1px solid #252b33; }
 QScrollBar:vertical { background:#0f1115; width:10px; }
 QScrollBar::handle:vertical { background:#667585; min-height:46px; border-radius:6px; border:1px solid #8392a3; }
@@ -249,6 +253,10 @@ QToolTip { padding:6px 8px; border:1px solid #d5dbe6; background:#ffffff; color:
 #terminalToolbar { background:#f1f5f9; border-bottom:1px solid #d5dbe6; min-height:30px; }
 #terminalToolbar QToolButton,#terminalToolbar QPushButton { min-height:26px; max-height:28px; padding:2px 7px; border-radius:5px; }
 #terminalToolbarStatus { color:#64748b; font-size:11px; padding-left:6px; }
+#autoRefreshLabel { color:#64748b; font-size:11px; }
+QWidget#autoRefreshControl { background:transparent; }
+QComboBox#autoRefreshCombo { min-height:28px; max-height:30px; min-width:104px; padding:4px 8px; }
+
 #terminalPanel { background:#ffffff; border-top:1px solid #d5dbe6; min-height:120px; }
 #terminalFooter { background:#ffffff; border-top:1px solid #d5dbe6; }
 QToolButton#terminalToggle { background:transparent; border:0; padding:3px 8px; color:#334155; }
