@@ -81,7 +81,7 @@ def test_load_processes_uses_fast_ps_snapshot():
     """Interactive process loading should use a quick ps snapshot and show failures."""
     assert "ssh.run_fast(" in MAIN_WINDOW_SRC
     assert "ps -eo pid=,user=,%cpu=,%mem=,stat=,args=" in MAIN_WINDOW_SRC
-    assert "Could not load processes:" in MAIN_WINDOW_SRC
+    assert "Server process list refresh failed:" in MAIN_WINDOW_SRC
 
 
 # --------------------------------------------------------------------------
