@@ -229,6 +229,9 @@ def test_terminal_explorer_has_transfer_progress_delete_and_media_controls():
     assert "VIDEO_EXTS" in src
     assert "def open_media(self, path, *, is_video):" in src
     assert '"Source"' in src
+    assert 'save_media_btn = QPushButton("Save As")' in src
+    assert 'save_media_btn.setEnabled(False)' in src
+    assert "shutil.copy2(temp_path, destination)" in src
     assert "task.cancel()" in src
 
 
