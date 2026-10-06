@@ -563,6 +563,15 @@ class MainWindow(QMainWindow):
             open_inspect=lambda name: self._open_container_inspect(name),
             remove_one=lambda name: self._spawn(self.container_action_exec("rm", name)),
         )
+        container_runner = TableAutoRefresh(self)
+        def refresh_containers_tick():
+            return self._spawn(self.load_containers(), "Auto refresh: containers")
+        container_allowed = lambda: bool(self.current_id) and self.pages.get("Containers") is self.stack.currentWidget()
+        container_runner.configure(page.auto_refresh.seconds, refresh_containers_tick, allowed=container_allowed)
+        page.auto_refresh.intervalChanged.connect(
+            lambda seconds: container_runner.configure(seconds, refresh_containers_tick, allowed=container_allowed)
+        )
+        self._table_refreshers["containers"] = (page.auto_refresh, container_runner)
         page.refresh_requested.connect(lambda: self._spawn(self.load_containers()))
         page.new_container_requested.connect(self._new_container_placeholder)
         page.details_requested.connect(self._open_container_details)
@@ -4162,7 +4171,6 @@ class MainWindow(QMainWindow):
     async def _load_server_overview(self):
         # Clear the table BEFORE fetching so stale data doesn't persist
         # if the SSH command fails.
-        self.server_overview_table.setRowCount(0)
         try:
             snap = await ServerMonitor(self.manager.servers[self.current_id].ssh).snapshot()
         except Exception as exc:
@@ -4174,8 +4182,18 @@ class MainWindow(QMainWindow):
             self.server_overview_table.setItem(r, 1, QTableWidgetItem(f"Could not fetch server info: {exc}"))
             return
         preferred=[("Hostname","hostname"),("OS","os"),("Uptime","uptime"),("CPU cores","cpu"),("Load","load_short"),("CPU usage","cpu_percent"),("Memory used","memory_used"),("Memory total","memory_total"),("Memory %","memory_percent"),("Disk","disk"),("Docker","docker")]
-        for label,key in preferred:
-            value=str(snap.get(key,"—")); r=self.server_overview_table.rowCount(); self.server_overview_table.insertRow(r); self.server_overview_table.setItem(r,0,QTableWidgetItem(label)); self.server_overview_table.setItem(r,1,QTableWidgetItem(value)); b=QToolButton(); b.setText("Copy"); b.clicked.connect(lambda _=False,v=value:self._copy_text(v)); self.server_overview_table.setCellWidget(r,2,b)
+        with self._atomic_table(self.server_overview_table, (0,)):
+            self.server_overview_table.setRowCount(0)
+            for label,key in preferred:
+                value=str(snap.get(key,"—"))
+                row=self.server_overview_table.rowCount()
+                self.server_overview_table.insertRow(row)
+                self.server_overview_table.setItem(row,0,QTableWidgetItem(label))
+                self.server_overview_table.setItem(row,1,QTableWidgetItem(value))
+                button=QToolButton(); button.setText("Copy")
+                button.clicked.connect(lambda _=False,v=value:self._copy_text(v))
+                self.server_overview_table.setCellWidget(row,2,button)
+
 
     async def _load_processes(self):
         """Load a fast process snapshot without blocking the Server page.
@@ -4188,13 +4206,6 @@ class MainWindow(QMainWindow):
             return
         ssh = self.manager.servers[self.current_id].ssh
         self._server_process_loading = True
-        self.process_table.setRowCount(0)
-        loading_row = self.process_table.rowCount()
-        self.process_table.insertRow(loading_row)
-        self.process_table.setSpan(loading_row, 0, 1, self.process_table.columnCount())
-        loading = QTableWidgetItem("Loading processes…")
-        loading.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.process_table.setItem(loading_row, 0, loading)
         try:
             result = await ssh.run_fast(
                 "ps -eo pid=,user=,%cpu=,%mem=,stat=,args= --sort=-%cpu 2>/dev/null | head -120",
@@ -4219,39 +4230,26 @@ class MainWindow(QMainWindow):
                     mem_val = None
                 rows.append((pid, user, cpu_val, mem_val, state, cmd))
 
-            self.process_table.setRowCount(0)
-            if not rows:
-                r = self.process_table.rowCount()
-                self.process_table.insertRow(r)
-                self.process_table.setSpan(r, 0, 1, self.process_table.columnCount())
-                item = QTableWidgetItem("No process data returned by ps")
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.process_table.setItem(r, 0, item)
-                return
-
-            for pid, user, cpu_val, mem_val, state, cmd in rows:
-                r = self.process_table.rowCount()
-                self.process_table.insertRow(r)
-                values = [
-                    pid, user,
-                    f"{cpu_val:.2f}" if cpu_val is not None else "—",
-                    f"{mem_val:.2f}" if mem_val is not None else "—",
-                    state, cmd,
-                ]
-                for c, val in enumerate(values):
-                    item = QTableWidgetItem(val)
-                    if c == 2 and cpu_val is not None:
-                        if cpu_val >= 70:
-                            item.setForeground(QColor("#ff5260"))
-                        elif cpu_val >= 30:
-                            item.setForeground(QColor("#ffca4b"))
-                        else:
-                            item.setForeground(QColor("#39d47a"))
-                    self.process_table.setItem(r, c, item)
-                self.process_table.setCellWidget(r, 6, self._process_action_widget(pid))
-                self.process_table.setRowHeight(r, 38)
-
-            self.statusBar().showMessage(f"Loaded {len(rows)} processes", 1800)
+            with self._atomic_table(self.process_table, (0,)):
+                if not rows:
+                    row = self.process_table.rowCount()
+                    self.process_table.insertRow(row)
+                    self.process_table.setSpan(row, 0, 1, self.process_table.columnCount())
+                    item = QTableWidgetItem("No process data returned by ps")
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.process_table.setItem(row, 0, item)
+                else:
+                    for pid, user, cpu_val, mem_val, state, cmd in rows:
+                        row = self.process_table.rowCount()
+                        self.process_table.insertRow(row)
+                        values = [pid, user, f"{cpu_val:.2f}" if cpu_val is not None else "—", f"{mem_val:.2f}" if mem_val is not None else "—", state, cmd]
+                        for col, value in enumerate(values):
+                            item = QTableWidgetItem(value)
+                            if col == 2 and cpu_val is not None:
+                                item.setForeground(QColor("#ff5260") if cpu_val >= 70 else QColor("#ffca4b") if cpu_val >= 30 else QColor("#39d47a"))
+                            self.process_table.setItem(row, col, item)
+                        self.process_table.setCellWidget(row, 6, self._process_action_widget(pid))
+                        self.process_table.setRowHeight(row, 38)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -4268,7 +4266,6 @@ class MainWindow(QMainWindow):
 
     async def _load_services(self):
         # Clear BEFORE fetching so stale data doesn't persist on failure.
-        self.service_table.setRowCount(0)
         try:
             # run_page keeps page-level SSH concurrency bounded by Settings.
             s = await self.manager.servers[self.current_id].ssh.run_page(
@@ -4289,12 +4286,14 @@ class MainWindow(QMainWindow):
             err_msg = (s.stderr or "systemctl not available or returned no data").strip()[:200]
             self.service_table.setItem(r, 0, QTableWidgetItem(f"systemctl error: {err_msg}"))
             return
-        for line in s.stdout.splitlines():
-            parts=line.strip().split(None,4)
-            if len(parts)<5 or not parts[0].endswith('.service'):continue
-            unit,load,active,sub,desc=parts; r=self.service_table.rowCount(); self.service_table.insertRow(r)
-            for c,val in enumerate([unit,load,active,sub,desc]): self.service_table.setItem(r,c,QTableWidgetItem(val))
-            self.service_table.setCellWidget(r,5,self._service_action_widget(unit)); self.service_table.setRowHeight(r,38)
+        with self._atomic_table(self.service_table, (0,)):
+            for line in s.stdout.splitlines():
+                parts=line.strip().split(None,4)
+                if len(parts)<5 or not parts[0].endswith('.service'):continue
+                unit,load,active,sub,desc=parts; r=self.service_table.rowCount(); self.service_table.insertRow(r)
+                for c,val in enumerate([unit,load,active,sub,desc]): self.service_table.setItem(r,c,QTableWidgetItem(val))
+                self.service_table.setCellWidget(r,5,self._service_action_widget(unit)); self.service_table.setRowHeight(r,38)
+
 
     def _copy_text(self,text):
         QApplication.clipboard().setText(str(text)); self.statusBar().showMessage("Copied",1500)
