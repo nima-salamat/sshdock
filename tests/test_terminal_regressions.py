@@ -59,7 +59,7 @@ def test_terminal_has_dedicated_scrollbar_gutter():
     assert "padding: 4px 16px 4px 4px" in src
     assert 'id="sshdock-scrollbar"' in src
     assert "scrollbar-width: none" in src
-    assert "scrollViewportToRatio" in src
+    assert "scrollToRatio" in src
     assert "term._core.viewport.scrollBarWidth = 0" in src
 
 
