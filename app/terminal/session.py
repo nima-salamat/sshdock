@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import re
+import posixpath
+import shlex
 from uuid import uuid4
+
+from app.terminal.docker_pretty import DOCKER_PRETTY_SH
 
 from PySide6.QtCore import QObject, Signal
 
@@ -39,6 +43,7 @@ class TerminalSession(QObject):
         self._close_lock = asyncio.Lock()
         self.cwd = "/"
         self._osc_buf = b""  # carry partial OSC sequences across reads
+        self._bootstrap_path: str | None = None
 
     async def start(self):
         if self.running or self.channel:
@@ -46,61 +51,105 @@ class TerminalSession(QObject):
         self._closing = False
         self.status.emit("● Connecting…")
         try:
-            self.channel = await self.ssh.open_shell()
+            shell = await self._detect_shell()
+            command = await self._prepare_shell_bootstrap(shell)
+            self.channel = await self.ssh.open_shell(command=command)
             self.running = True
             self.status.emit("● Connected")
-            self.reader_task = create_task(self._reader(), name=f"terminal-reader-{self.id[:8]}", owner="terminal")
-            # Small delay so the remote shell is ready to accept the integration script.
-            await asyncio.sleep(0.15)
-            await self._install_shell_integration()
+            self.reader_task = create_task(
+                self._reader(),
+                name=f"terminal-reader-{self.id[:8]}",
+                owner="terminal",
+            )
         except Exception as exc:
             self.running = False
             self.channel = None
+            await self._cleanup_bootstrap()
             self.status.emit(f"● Failed: {exc}")
             raise
 
-    async def _install_shell_integration(self):
-        """Install a quiet OSC 7 cwd reporter and emit the current directory once.
-
-        The script is sent with local-echo off and the install line is cleared so
-        the user never sees setup noise. CWD is also parsed on the Python side
-        from the PTY stream so explorer stays in sync even if the JS bridge is late.
-        """
-        if not self.channel or self.channel.closed:
-            return
-        # Minimal, portable one-liner. printf gets textual \033 (not binary ESC).
-        # Python also parses OSC 7 from the PTY stream, so explorer sync does not
-        # depend solely on this hook succeeding.
-        # Note: $ is not special in normal Python strings — it is expanded by the remote shell.
-        setup = (
-            "stty -echo 2>/dev/null; "
-            "export TERM=xterm-256color COLORTERM=truecolor; "
-            "export CLICOLOR=1; "
-            "__sshdock_cwd(){ printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; }; "
-            "PROMPT_COMMAND=\"__sshdock_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}\"; "
-            "precmd_functions=(__sshdock_cwd); "
-            "PS1='\\[\\033[01;32m\\]\\u@\\h\\[\\033[00m\\]:\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\$ '; "
-            "alias ls='ls --color=auto' 2>/dev/null; "
-            "alias grep='grep --color=auto' 2>/dev/null; "
-            "alias fgrep='fgrep --color=auto' 2>/dev/null; "
-            "alias egrep='egrep --color=auto' 2>/dev/null; "
-            "alias ll='ls -alF --color=auto' 2>/dev/null; "
-            "alias la='ls -A --color=auto' 2>/dev/null; "
-            "command -v dircolors >/dev/null 2>&1 && eval \"$(dircolors -b 2>/dev/null)\"; "
-            "__sshdock_cwd; "
-            "stty echo 2>/dev/null; "
-            "printf '\\r\\033[K'\r"
-        )
+    async def _detect_shell(self) -> str:
+        """Detect the user's login shell without touching the interactive PTY."""
         try:
-            await asyncio.wait_for(self.channel.write(setup.encode("utf-8")), timeout=2.5)
+            result = await self.ssh.run_fast(
+                "printf '%s' \"${SHELL:-/bin/sh}\"",
+                timeout=3,
+            )
+            shell = (result.stdout or "").strip()
+            if posixpath.basename(shell) in {"bash", "zsh", "fish", "sh", "dash", "ksh"}:
+                return shell
         except Exception:
             pass
-        # Pretty Docker table formatters (docker ps / images / volume / …)
+        return "/bin/sh"
+
+    async def _write_bootstrap(self, path: str, content: str) -> None:
+        """Write startup code over a non-PTY SSH exec channel."""
+        proc = await self.ssh.start_command("cat > " + shlex.quote(path))
         try:
-            from app.terminal.docker_pretty import install_command
-            pretty = install_command() + "\r"
-            await asyncio.sleep(0.05)
-            await asyncio.wait_for(self.channel.write(pretty.encode("utf-8")), timeout=3.0)
+            proc.stdin.write(content)
+            proc.stdin.write_eof()
+            await asyncio.wait_for(proc.wait_closed(), 4.0)
+        finally:
+            try:
+                await proc.stdin.drain()
+            except Exception:
+                pass
+
+    async def _prepare_shell_bootstrap(self, shell: str) -> str:
+        shell_name = posixpath.basename(shell)
+        token = uuid4().hex[:16]
+
+        if shell_name == "bash":
+            path = f"/tmp/.sshdock-bashrc-{token}"
+            script = "\n".join([
+                "# SSHDock private terminal bootstrap",
+                "stty -echo 2>/dev/null",
+                "export TERM=xterm-256color COLORTERM=truecolor CLICOLOR=1",
+                "__sshdock_cwd(){ printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; }",
+                "PROMPT_COMMAND=\"__sshdock_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}\"",
+                "PS1='\\[\\033[01;32m\\]\\u@\\h\\[\\033[00m\\]:\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\$ '",
+                "alias ls='ls --color=auto' 2>/dev/null",
+                "alias grep='grep --color=auto' 2>/dev/null",
+                "alias fgrep='fgrep --color=auto' 2>/dev/null",
+                "alias egrep='egrep --color=auto' 2>/dev/null",
+                "alias ll='ls -alF --color=auto' 2>/dev/null",
+                "alias la='ls -A --color=auto' 2>/dev/null",
+                "command -v dircolors >/dev/null 2>&1 && eval \"$(dircolors -b 2>/dev/null)\"",
+                DOCKER_PRETTY_SH,
+                "__sshdock_cwd",
+            ]).join("\n") + "\n"
+            await self._write_bootstrap(path, script)
+            self._bootstrap_path = path
+            return "exec " + shlex.quote(shell) + " --noprofile --rcfile " + shlex.quote(path) + " -i"
+
+        if shell_name == "zsh":
+            directory = f"/tmp/.sshdock-zdot-{token}"
+            path = f"{directory}/.zshrc"
+            script = "\n".join([
+                "# SSHDock private terminal bootstrap",
+                "stty -echo 2>/dev/null",
+                "export TERM=xterm-256color COLORTERM=truecolor CLICOLOR=1",
+                "precmd() { printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; }",
+                "PROMPT='%F{green}%n@%m%f:%F{blue}%~%f%# '",
+                "alias ls='ls --color=auto' 2>/dev/null",
+                "alias ll='ls -alF --color=auto' 2>/dev/null",
+                "alias la='ls -A --color=auto' 2>/dev/null",
+                "precmd",
+            ]).join("\n") + "\n"
+            await self.ssh.run_fast("mkdir -m 700 -p " + shlex.quote(directory), timeout=3)
+            await self._write_bootstrap(path, script)
+            self._bootstrap_path = directory
+            return "ZDOTDIR=" + shlex.quote(directory) + " exec " + shlex.quote(shell) + " -d -i"
+
+        return "exec " + shlex.quote(shell) + " -i"
+
+    async def _cleanup_bootstrap(self) -> None:
+        path = self._bootstrap_path
+        self._bootstrap_path = None
+        if not path:
+            return
+        try:
+            await self.ssh.run_fast("rm -rf -- " + shlex.quote(path), timeout=3)
         except Exception:
             pass
 
@@ -217,6 +266,8 @@ class TerminalSession(QObject):
                     await asyncio.wait_for(self.ssh.close_channel(channel), timeout=1.0)
                 except Exception:
                     pass
+
+            await self._cleanup_bootstrap()
 
             if self.owned_transport is not None:
                 try:
