@@ -293,7 +293,7 @@ def build_top_script(sample_interval: float = 1.0,
         "if [ -s \"$tmp\" ]; then cat \"$tmp\"; "
         "else "
         "ps -eo pid=,user=,%cpu=,%mem=,rss=,stat=,args= --sort=-%cpu 2>/dev/null | "
-        "awk '{cmd=$7; for(i=8;i<=NF;i++) cmd=cmd\" \"$i; print $1\"\\t\"$2\"\\t\"$3\"\\t\"$4\"\\t\"($5/1024)\"\\t\"$6\"\\t\"cmd}' | "
+        "awk '{{cmd=$7; for(i=8;i<=NF;i++) cmd=cmd\" \"$i; print $1\"\\t\"$2\"\\t\"$3\"\\t\"$4\"\\t\"($5/1024)\"\\t\"$6\"\\t\"cmd}}' | "
         "head -n {max_procs}; "
         "fi; "
         "rm -f \"$tmp\" 2>/dev/null; "
