@@ -23,7 +23,7 @@ FILES = (
     FileType("html", "fa5s.code", (".html", ".htm", ".xml", ".svg"), "html"),
     FileType("css", "fa5s.palette", (".css", ".scss", ".sass"), "css"),
     FileType("image", "fa5s.image", (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico"), None),
-    FileType("archive", "fa5s.file-archive", (".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar"), None),
+    FileType("archive", "fa5s.file-archive", (".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".tgz", ".tbz", ".tbz2", ".txz", ".tzst", ".zst", ".lz4", ".lzma", ".cab", ".iso", ".jar", ".war", ".ear", ".apk"), None),
     FileType("log", "fa5s.file-alt", (".log",), "log"),
     FileType("text", "fa5s.file-alt", (".txt", ".conf", ".ini", ".env"), "text"),
     FileType("docker", "fa5s.box", ("dockerfile", "compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"), "yaml"),
