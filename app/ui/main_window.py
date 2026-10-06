@@ -38,7 +38,7 @@ from app.ui.docker_results_table import DockerResultsTable
 from app.ui.dialogs import ErrorDialog, ConfirmRemoveDialog
 from app.files.highlighter import CodeHighlighter
 from app.ui.container_details import ContainerDetailsWindow
-from app.ui.widgets import NavButton, MetricCard, icon_button
+from app.ui.widgets import NavButton, MetricCard, icon_button, AutoRefreshControl, TableAutoRefresh
 from app.ui.resource_monitor import ResourceMonitorDialog
 from app.workers.task_manager import TaskManager
 
@@ -103,6 +103,8 @@ class MainWindow(QMainWindow):
         self._overview_refresh_seconds = 5
         self._overview_timer = QTimer(self)
         self._overview_timer.timeout.connect(self._auto_refresh_overview)
+        self._table_refreshers: dict[str, tuple[AutoRefreshControl, TableAutoRefresh]] = {}
+        self._table_refresh_default = 5
         self._resource_monitor_dialog = None
         self._server_process_loading = False
         self._server_process_refresh_task: asyncio.Task | None = None
@@ -460,6 +462,45 @@ class MainWindow(QMainWindow):
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
+
+    def _table_refresh_default_seconds(self) -> int:
+        try:
+            value = self.store.load_ui_prefs().get("table_auto_refresh_seconds", 5)
+            value = int(value)
+            return value if value in {0, 2, 5, 10, 30} else 5
+        except Exception:
+            return 5
+
+    def _register_table_auto_refresh(
+        self,
+        key: str,
+        layout,
+        callback,
+        *,
+        page_name: str,
+        allowed=None,
+        default: int | None = None,
+    ):
+        control = AutoRefreshControl(
+            self._table_refresh_default_seconds() if default is None else default,
+            self,
+        )
+        runner = TableAutoRefresh(self)
+        if allowed is None:
+            allowed = lambda: bool(self.current_id) and self.pages.get(page_name) is self.stack.currentWidget()
+        def fire():
+            return self._spawn(callback(), f"Auto refresh: {key}")
+        def changed(seconds: int):
+            runner.configure(seconds, fire, allowed=allowed)
+        control.intervalChanged.connect(changed)
+        runner.configure(control.seconds, fire, allowed=allowed)
+        self._table_refreshers[key] = (control, runner)
+        layout.addWidget(control)
+        return control
+
+    def _stop_all_table_refreshers(self):
+        for _control, runner in self._table_refreshers.values():
+            runner.stop()
 
     def _overview_refresh_changed(self, _=0):
         self._overview_refresh_seconds=int(self.overview_refresh.currentData() or 0); self._configure_overview_timer()
