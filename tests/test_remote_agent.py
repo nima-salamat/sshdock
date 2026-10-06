@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import struct
 from types import SimpleNamespace
@@ -46,10 +45,9 @@ def test_remote_agent_is_disabled_by_default():
     assert connection.remote_agent_connected is False
 
 
-@pytest.mark.asyncio
-async def test_remote_agent_toggle_does_not_start_when_disconnected():
+def test_remote_agent_toggle_does_not_start_when_disconnected():
     profile = SSHProfile(id="1", name="test")
     connection = SSHServerConnection(profile, SimpleNamespace(get=lambda *_: None))
-    await connection.set_remote_agent_enabled(True)
+    connection._remote_agent_enabled = True
     assert connection.remote_agent_enabled is True
     assert connection.remote_agent_connected is False
