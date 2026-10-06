@@ -401,10 +401,12 @@ class MainWindow(QMainWindow):
         head = QHBoxLayout()
         title = QLabel("Overview"); title.setObjectName("heroTitle"); head.addWidget(title)
         sub = QLabel("Live host and Docker telemetry over the persistent SSH connection."); sub.setObjectName("heroSubtitle"); head.addWidget(sub); head.addStretch()
-        self.overview_refresh_label = QLabel("Auto refresh"); self.overview_refresh_label.setObjectName("muted"); head.addWidget(self.overview_refresh_label)
-        self.overview_refresh = QComboBox()
-        self.overview_refresh.addItem("Off", 0); self.overview_refresh.addItem("2 seconds", 2); self.overview_refresh.addItem("5 seconds", 5); self.overview_refresh.addItem("10 seconds", 10)
-        self.overview_refresh.setCurrentIndex(2); self.overview_refresh.currentIndexChanged.connect(self._overview_refresh_changed); head.addWidget(self.overview_refresh)
+        self.overview_refresh = self._register_table_auto_refresh(
+            "overview",
+            head,
+            self.refresh_overview,
+            page_name="Overview",
+        )
         head.addWidget(icon_button("Refresh", "fa5s.sync-alt", lambda: self._spawn(self.refresh_overview()), "Refresh overview"))
         head.addWidget(icon_button("Resource monitor", "fa5s.microchip", self.open_resource_monitor, "Open live CPU and memory monitor"))
         lay.addLayout(head)
@@ -503,15 +505,19 @@ class MainWindow(QMainWindow):
             runner.stop()
 
     def _overview_refresh_changed(self, _=0):
-        self._overview_refresh_seconds=int(self.overview_refresh.currentData() or 0); self._configure_overview_timer()
+        # Kept as compatibility API for older callers.
+        seconds = self.overview_refresh.seconds if hasattr(self.overview_refresh, "seconds") else 0
+        self._overview_refresh_seconds = seconds
 
     def _configure_overview_timer(self):
-        self._overview_timer.stop(); seconds=self._overview_refresh_seconds
-        self.overview_refresh_label.setText("Auto refresh: Off" if seconds==0 else f"Auto refresh: {seconds}s")
-        if seconds>0 and self.current_id: self._overview_timer.start(seconds*1000)
+        # AutoRefreshControl/TableAutoRefresh own the timer now.
+        if hasattr(self, "_overview_timer"):
+            self._overview_timer.stop()
 
     def _auto_refresh_overview(self):
-        if self.current_id and self.title.text()=="Overview": self._spawn(self.refresh_overview())
+        # Legacy hook; the shared table refresh controller handles scheduling.
+        if self.current_id and self.title.text() == "Overview":
+            self._spawn(self.refresh_overview(), "Auto refresh: overview")
 
     def _install_copy_context(self, widget):
         widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -592,9 +598,12 @@ class MainWindow(QMainWindow):
         sub.setObjectName("heroSubtitle")
         header.addWidget(sub, 1)
 
-        auto_refresh_cb = QCheckBox("Auto-refresh (5s)")
-        auto_refresh_cb.setChecked(False)
-        header.addWidget(auto_refresh_cb)
+        self.stats_auto_refresh = self._register_table_auto_refresh(
+            "stats",
+            header,
+            self.load_container_stats,
+            page_name="Stats",
+        )
 
         refresh_btn = QPushButton("↻ Refresh")
         refresh_btn.setToolTip("Fetch fresh stats for all running containers")
@@ -651,11 +660,6 @@ class MainWindow(QMainWindow):
         hint.setObjectName("statsHint")
         lay.addWidget(hint)
 
-        # Auto-refresh timer.
-        self._stats_auto_timer = QTimer(self)
-        self._stats_auto_timer.setInterval(5000)
-        self._stats_auto_timer.timeout.connect(lambda: self._spawn(self.load_container_stats()))
-        auto_refresh_cb.toggled.connect(lambda on: self._stats_auto_timer.start() if on else self._stats_auto_timer.stop())
 
         return page
 
