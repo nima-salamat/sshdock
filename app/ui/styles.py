@@ -146,6 +146,25 @@ QTreeWidget#terminalExplorerTree::item:selected { background:#1d3857; color:#fff
 
 
 
+/* File viewer */
+QPlainTextEdit#fileViewerEditor { background:#0a0e14; color:#e6edf3; border:1px solid #252c36; border-radius:6px; padding:6px; selection-background-color:#1d6fe8; }
+#fileViewerPath { color:#7a8694; font-size:11px; padding:0 4px; }
+#fileViewerMeta { color:#5c6773; font-size:11px; padding-right:6px; }
+QTabWidget#fileBrowserTabs QTabBar::tab { background:#121820; color:#9aa6b5; border:1px solid #252c36; border-bottom:none; border-top-left-radius:6px; border-top-right-radius:6px; padding:6px 12px; margin-right:2px; min-height:24px; }
+QTabWidget#fileBrowserTabs QTabBar::tab:selected { background:#0a0e14; color:#e8eef6; border-color:#3b4656; }
+QTabWidget#fileBrowserTabs QTabBar::tab:hover:!selected { background:#1a222c; color:#dbe3ee; }
+QToolButton#feNewTab { border:1px solid #2a3340; border-radius:6px; background:#161c24; }
+QToolButton#feNewTab:hover { background:#1c2430; border-color:#3b4656; }
+QWidget#editorWorkspace { background:#0b0f14; color:#dbe5f2; }
+QTabWidget#editorTabs::pane { border:none; background:#0d1117; }
+QTabWidget#editorTabs QTabBar::tab { background:#161b22; color:#8b949e; padding:8px 14px; margin-right:1px; }
+QTabWidget#editorTabs QTabBar::tab:selected { background:#0d1117; color:#e6edf3; }
+QTabWidget#editorTabs QTabBar::tab:hover:!selected { background:#1c2128; color:#c9d1d9; }
+#editorPath,#editorStatus { color:#8b949e; }
+QPlainTextEdit#editorView { background:#0d1117; color:#e6edf3; border:none; selection-background-color:#264f78; }
+QPushButton#editorSaveButton { background:#238636; color:#fff; border:none; padding:5px 14px; border-radius:6px; font-weight:600; }
+QPushButton#editorSaveButton:hover { background:#2ea043; }
+
 """
 LIGHT = """
 QWidget { background:#f4f6f9; color:#1e293b; font-family:'Segoe UI'; font-size:13px; }
@@ -286,6 +305,25 @@ QSplitter#mainSplitter::handle:vertical:pressed { background:#2563eb; }
 
 
 
+
+/* File viewer */
+QPlainTextEdit#fileViewerEditor { background:#ffffff; color:#1e293b; border:1px solid #d5dbe6; border-radius:6px; padding:6px; selection-background-color:#bfdbfe; }
+#fileViewerPath { color:#64748b; font-size:11px; padding:0 4px; }
+#fileViewerMeta { color:#64748b; font-size:11px; padding-right:6px; }
+QTabWidget#fileBrowserTabs QTabBar::tab { background:#eef2f7; color:#64748b; border:1px solid #d5dbe6; border-bottom:none; border-top-left-radius:6px; border-top-right-radius:6px; padding:6px 12px; margin-right:2px; min-height:24px; }
+QTabWidget#fileBrowserTabs QTabBar::tab:selected { background:#ffffff; color:#0f172a; border-color:#93a4b8; }
+QTabWidget#fileBrowserTabs QTabBar::tab:hover:!selected { background:#e2e8f0; color:#334155; }
+QToolButton#feNewTab { border:1px solid #cbd5e1; border-radius:6px; background:#ffffff; }
+QToolButton#feNewTab:hover { background:#e2e8f0; border-color:#94a3b8; }
+QWidget#editorWorkspace { background:#ffffff; color:#1e293b; }
+QTabWidget#editorTabs::pane { border:none; background:#ffffff; }
+QTabWidget#editorTabs QTabBar::tab { background:#eef2f7; color:#64748b; padding:8px 14px; margin-right:1px; }
+QTabWidget#editorTabs QTabBar::tab:selected { background:#ffffff; color:#0f172a; }
+QTabWidget#editorTabs QTabBar::tab:hover:!selected { background:#e2e8f0; color:#334155; }
+#editorPath,#editorStatus { color:#64748b; }
+QPlainTextEdit#editorView { background:#ffffff; color:#1e293b; border:none; selection-background-color:#bfdbfe; }
+QPushButton#editorSaveButton { background:#16a34a; color:#fff; border:none; padding:5px 14px; border-radius:6px; font-weight:600; }
+QPushButton#editorSaveButton:hover { background:#15803d; }
 
 """
 
