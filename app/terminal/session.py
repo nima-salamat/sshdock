@@ -76,7 +76,6 @@ class TerminalSession(QObject):
             return
 
         setup = (
-            "stty -echo 2>/dev/null; "
             "export TERM=xterm-256color COLORTERM=truecolor; "
             "export CLICOLOR=1; "
             "__sshdock_cwd(){ printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; }; "
@@ -94,18 +93,42 @@ class TerminalSession(QObject):
             "stty echo 2>/dev/null; "
             "printf '\\r\\033[K'\\r"
         )
+        echo_disabled = False
         try:
-            await asyncio.wait_for(self.channel.write(setup.encode("utf-8")), timeout=2.5)
-        except Exception:
-            pass
-        try:
+            # Disable PTY echo separately. If stty -echo is embedded in the
+            # same input line, the PTY echoes that line before stty executes.
+            await asyncio.wait_for(
+                self.channel.write(b"stty -echo 2>/dev/null\\r"),
+                timeout=2.0,
+            )
+            echo_disabled = True
+            await asyncio.sleep(0.04)
+            # Clear the prompt produced after the stty command.
+            await asyncio.wait_for(
+                self.channel.write(b"printf '\\r\\033[K'\\r"),
+                timeout=2.0,
+            )
+            await asyncio.sleep(0.02)
+            await asyncio.wait_for(
+                self.channel.write((setup + "\\r").encode("utf-8")),
+                timeout=2.5,
+            )
             from app.terminal.docker_pretty import install_command
-            pretty = install_command() + "\r"
+            pretty = install_command(manage_echo=False) + "\\r"
             await asyncio.sleep(0.05)
-            await asyncio.wait_for(self.channel.write(pretty.encode("utf-8")), timeout=3.0)
+            await asyncio.wait_for(
+                self.channel.write(pretty.encode("utf-8")),
+                timeout=3.0,
+            )
         except Exception:
-            pass
-
+            if echo_disabled:
+                try:
+                    await asyncio.wait_for(
+                        self.channel.write(b"stty echo 2>/dev/null; printf '\\r\\033[K'\\r"),
+                        timeout=2.0,
+                    )
+                except Exception:
+                    pass
     def _extract_cwd(self, data: bytes) -> bytes:
         """Parse OSC 7 (cwd) + OSC 777 magic; strip magic from stream."""
         blob = self._osc_buf + data
