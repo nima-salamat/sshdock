@@ -27,6 +27,17 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      - name: Validate terminal JavaScript
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          src = Path("app/terminal/web/terminal.html").read_text(encoding="utf-8")
+          scripts = re.findall(r"<script(?:\\s[^>]*)?>(.*?)</script>", src, flags=re.S | re.I)
+          Path("/tmp/sshdock-terminal.js").write_text("\\n".join(scripts), encoding="utf-8")
+          PY
+          node --check /tmp/sshdock-terminal.js
+
       - name: Compile sources
         run: python -m compileall -q app tests
 
