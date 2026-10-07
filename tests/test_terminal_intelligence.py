@@ -24,8 +24,8 @@ def test_terminal_html_has_ghost_completion_and_tab_acceptance():
 
 def test_terminal_html_keeps_xterm_scrollbar_visible():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
-    assert "id="sshdock-scroll-gutter"" in src
-    assert "id="sshdock-scroll-thumb"" in src
+    assert 'id="sshdock-scroll-gutter"' in src
+    assert 'id="sshdock-scroll-thumb"' in src
     assert "scrollbar-width: none" in src
     assert "scrollBarWidth = 0" in src
     assert "pointerdown" in src
