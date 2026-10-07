@@ -33,6 +33,7 @@ from app.ui.notifications import NotificationBus, ToastHost, NotificationBell
 from app.ui.styles import theme_stylesheet, DARK, LIGHT
 from app.terminal.web_widget import create_terminal_widget, XtermTerminalWidget, HAS_WEBENGINE
 from app.terminal.emulator import TerminalWidget  # fallback / type checks
+from app.terminal.predictor import CommandPredictor, load_remote_history
 from app.files.browser import RemoteFileBrowser, ServerFileBackend, ContainerFileBackend
 from app.files.terminal_explorer import TerminalFileExplorer
 from app.ui.docker_results_table import DockerResultsTable
@@ -90,6 +91,9 @@ class MainWindow(QMainWindow):
         self._magic_table_kind: dict[str, str] = {}
         self.terminal_meta: dict[str, QLabel] = {}
         self.terminal_status: dict[str, str] = {}
+        self.terminal_server_ids: dict[str, str] = {}
+        self.terminal_shells: dict[str, str] = {}
+        self._command_predictor = CommandPredictor()
         self._tasks: set[asyncio.Task] = set()
         self.task_manager = TaskManager()
         self._page_refresh_task = None
@@ -3649,6 +3653,9 @@ class MainWindow(QMainWindow):
         page_layout.setSpacing(0)
         prefs = self.store.load_ui_prefs()
         term = create_terminal_widget(theme=str(prefs.get("theme") or "dark"))
+        if hasattr(term, "set_completion_provider"):
+            term.set_completion_provider(self._predict_terminal_command)
+            term.set_completion_context(server_id=server_id, cwd="/", shell="")
         try:
             fam = str(prefs.get("terminal_font_family") or "Consolas")
             sz = int(prefs.get("terminal_font_size") or 13)
@@ -3668,6 +3675,7 @@ class MainWindow(QMainWindow):
         try:
             session = await asyncio.wait_for(self.manager.open_terminal(server_id, title), timeout=15.0)
             self.terms[session.id] = session
+            self.terminal_server_ids[session.id] = server_id
             session_ref["id"] = session.id
             self.terminal_widgets[session.id] = page
             self.terminal_meta[session.id] = status_label
@@ -3705,6 +3713,11 @@ class MainWindow(QMainWindow):
             if hasattr(term, "cwd_changed"):
                 term.cwd_changed.connect(lambda path, sid=session.id: self._terminal_cwd_changed(sid, path))
 
+            self._spawn(
+                self._load_terminal_predictor_history(session.id, session.ssh, server_id, term),
+                name="Terminal history",
+            )
+
             await asyncio.sleep(0)
             # Initial PTY size — xterm reports via FitAddon; estimate until then
             cols, rows = 120, 36
@@ -3734,6 +3747,71 @@ class MainWindow(QMainWindow):
             term.show_message(f"\n\x1b[31mSSH terminal failed to start:\x1b[0m {exc}\n")
             self.statusBar().showMessage(f"Terminal failed: {exc}", 10000)
             log.exception("Terminal creation failed")
+
+    def _predict_terminal_command(self, prefix: str, cwd: str, shell: str, server_id: str) -> str:
+        """Return a ghost completion synchronously; the predictor is in-memory and tiny."""
+        sid = server_id or self.terminal_server_ids.get(
+            self.terminal_picker.currentData() if getattr(self, "terminal_picker", None) else "",
+            self.current_id or "",
+        )
+        value = self._command_predictor.suggest(
+            prefix,
+            server_id=sid or "",
+            cwd=cwd or "/",
+            shell=shell or self.terminal_shells.get(
+                self.terminal_picker.currentData() if getattr(self, "terminal_picker", None) else "",
+                "",
+            ),
+        )
+        return str(value or "")
+
+    async def _load_terminal_predictor_history(self, sid: str, ssh, server_id: str, term) -> None:
+        try:
+            snapshot = await load_remote_history(ssh)
+            if snapshot.commands:
+                self._command_predictor.ingest_snapshot(snapshot, server_id=server_id)
+            self.terminal_shells[sid] = snapshot.shell
+            if hasattr(term, "set_completion_context"):
+                session = self.terms.get(sid)
+                term.set_completion_context(
+                    server_id=server_id,
+                    cwd=getattr(session, "cwd", "/") if session is not None else "/",
+                    shell=snapshot.shell,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.debug("Terminal predictor history load failed for %s", server_id, exc_info=True)
+
+    def _terminal_command_submitted(self, command: str, term) -> None:
+        """Observe explicitly submitted commands without intercepting shell transport."""
+        if not command or not self.current_id:
+            return
+        sid = next((key for key, widget in self.terminal_widgets.items() if widget is term.parentWidget()), None)
+        if sid is None:
+            # The widget is nested in the terminal page; walk the mapping defensively.
+            for key, page in self.terminal_widgets.items():
+                try:
+                    if term is page or term.isAncestorOf(page):
+                        sid = key
+                        break
+                except Exception:
+                    continue
+        if sid is None:
+            for key, page in self.terminal_widgets.items():
+                if term is page or term.parentWidget() is page:
+                    sid = key
+                    break
+        session = self.terms.get(sid) if sid else None
+        server_id = self.terminal_server_ids.get(sid or "", self.current_id)
+        if session is None:
+            return
+        self._command_predictor.add_command(
+            command,
+            server_id=server_id,
+            cwd=getattr(session, "cwd", "/") or "/",
+            shell=self.terminal_shells.get(sid or "", ""),
+        )
 
     def _terminal_cwd_changed(self, sid: str, path: str):
         """Shell → explorer: keep session.cwd and live-sync the visible explorer."""
@@ -3770,6 +3848,8 @@ class MainWindow(QMainWindow):
 
     def _terminal_ui_closed(self, sid):
         self.terms.pop(sid, None)
+        self.terminal_server_ids.pop(sid, None)
+        self.terminal_shells.pop(sid, None)
         widget = self.terminal_widgets.pop(sid, None)
         self.terminal_meta.pop(sid, None)
         self.terminal_status.pop(sid, None)
