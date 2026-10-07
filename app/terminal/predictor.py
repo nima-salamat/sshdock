@@ -218,26 +218,41 @@ def parse_history_output(output: str) -> HistorySnapshot:
     """Parse bash/zsh/fish history formats from a bounded mixed stream."""
     commands: list[str] = []
     shell = ""
+    source = ""
 
     for raw in (output or "").splitlines():
-        line = raw.strip()
-        if not line:
+        line = raw.rstrip()
+        stripped = line.strip()
+        if not stripped:
             continue
-        if line.startswith("__SSHDock_SHELL__"):
-            shell = line.split("=", 1)[-1].strip()
+        if stripped.startswith("__SSHDock_SHELL__"):
+            shell = stripped.split("=", 1)[-1].strip()
             continue
-        if line in {"__BASH__", "__ZSH__", "__FISH__"}:
+        if stripped == "__BASH__":
+            source = "bash"
             continue
-        if line.startswith(": ") and ";" in line:
-            line = line.split(";", 1)[1].strip()
-        elif line.startswith("- cmd:"):
-            line = line.split(":", 1)[1].strip()
+        if stripped == "__ZSH__":
+            source = "zsh"
+            continue
+        if stripped == "__FISH__":
+            source = "fish"
+            continue
+
+        if source == "fish":
+            if not stripped.startswith("- cmd:"):
+                continue
+            line = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith(": ") and ";" in stripped:
+            line = stripped.split(";", 1)[1].strip()
+        else:
+            line = stripped
 
         safe = sanitize_command(line)
         if safe is not None:
             commands.append(safe)
 
     return HistorySnapshot(tuple(commands[-1200:]), shell=shell)
+
 
 
 async def load_remote_history(ssh) -> HistorySnapshot:

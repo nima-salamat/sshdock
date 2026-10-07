@@ -392,10 +392,18 @@
         /* Ctrl+U / Ctrl+C / Ctrl+D and readline cursor operations make a
            local shadow buffer unreliable; fall back safely instead of
            suggesting the wrong command. */
-        if (value.indexOf('\x03') >= 0 || value.indexOf('\x04') >= 0 || value.indexOf('\x15') >= 0) {
+        if (value.indexOf('\x03') >= 0 || value.indexOf('\x04') >= 0) {
           inputModel = '';
-          inputModelKnown = false;
+          inputModelKnown = value.indexOf('\x04') < 0;
           hideGhost();
+          return;
+        }
+
+        if (value.indexOf('\x15') >= 0) {
+          inputModel = '';
+          inputModelKnown = true;
+          hideGhost();
+          requestGhostPrediction();
           return;
         }
 
