@@ -126,56 +126,61 @@ class TerminalSession(QObject):
             setup = ""
         echo_disabled = False
         try:
-            # Disable PTY echo separately. If stty -echo is embedded in the
-            # same input line, the PTY echoes that line before stty executes.
+            # Temporarily disable PTY echo while SSHDock installs integration.
             await asyncio.wait_for(
                 self.channel.write(b"stty -echo 2>/dev/null\r"),
                 timeout=2.0,
             )
             echo_disabled = True
             await asyncio.sleep(0.04)
-            # Clear the prompt produced after the stty command.
             await asyncio.wait_for(
                 self.channel.write(b"printf '\r\033[K'\r"),
                 timeout=2.0,
             )
             await asyncio.sleep(0.02)
+
+            # Keep prompt decoration separate from mdocker installation.
+            if setup:
+                try:
+                    await asyncio.wait_for(
+                        self.channel.write((setup + "\r").encode("utf-8")),
+                        timeout=4.0,
+                    )
+                except Exception:
+                    pass
+
+            try:
+                from app.terminal.docker_pretty import install_command
+                pretty = install_command(manage_echo=False) + "\r"
+                await asyncio.sleep(0.05)
+                await asyncio.wait_for(
+                    self.channel.write(pretty.encode("utf-8")),
+                    timeout=4.0,
+                )
+            except Exception:
+                pass
         except Exception:
+            # If PTY echo could not be disabled, don't leave a partial setup.
             if echo_disabled:
                 try:
                     await asyncio.wait_for(
-                        self.channel.write(b"stty echo 2>/dev/null; printf '\r\033[K'\r"),
+                        self.channel.write(b"stty echo 2>/dev/null\r"),
                         timeout=2.0,
                     )
                 except Exception:
                     pass
             return
-
-        # Keep prompt decoration separate from mdocker installation. A setup
-        # failure must never prevent the magic command support from loading.
-        try:
-            await asyncio.wait_for(
-                self.channel.write((setup + "\r").encode("utf-8")),
-                timeout=4.0,
-            )
-        except Exception:
-            pass
-
-        try:
-            from app.terminal.docker_pretty import install_command
-            pretty = install_command(manage_echo=not echo_disabled) + "\r"
-            await asyncio.sleep(0.05)
-            await asyncio.wait_for(
-                self.channel.write(pretty.encode("utf-8")),
-                timeout=4.0,
-            )
-        except Exception:
-            if echo_disabled:
+        finally:
+            if echo_disabled and self.channel and not self.channel.closed:
                 try:
+                    # Always restore normal interactive PTY echo.
                     await asyncio.wait_for(
-                        self.channel.write(b"stty echo 2>/dev/null; printf '\r\033[K'\r"),
+                        self.channel.write(
+                            b"stty echo 2>/dev/null; printf '\r\033[K'\r"
+                        ),
                         timeout=2.0,
                     )
+                    await asyncio.sleep(0.03)
                 except Exception:
                     pass
 
