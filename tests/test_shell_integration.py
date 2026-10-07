@@ -10,9 +10,7 @@ def test_shell_integration_preserves_existing_prompt_hooks():
     block = src[start:end]
 
     assert "PS1=" in block
-    assert "case \"${PS1:-}\" in" in block
     assert "debian_chroot" in block
-    assert 'case "${PS1:-}" in' in block
     assert "PROMPT_COMMAND" in block
     assert "add-zsh-hook precmd __sshdock_cwd" in block
     assert "__sshdock_cwd" in block

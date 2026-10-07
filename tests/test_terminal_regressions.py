@@ -83,7 +83,11 @@ def test_terminal_magic_supports_native_docker_magic_form_for_posix_shells():
     docker = (ROOT / "app/terminal/docker_pretty.py").read_text(encoding="utf-8")
     assert "docker() {" in docker
     assert "--magic|--mdocker)" in docker
-    assert "__sshdock_magic" in docker
+    assert '"$arg" = "--magic"' in docker
+    assert '"$arg" = "--mdocker"' in docker
+    assert "command docker \"$@\"" in docker
+
+
 def test_terminal_magic_supports_native_docker_magic_form_for_fish():
     docker = (ROOT / "app/terminal/docker_pretty.py").read_text(encoding="utf-8")
     assert "function docker" in docker
@@ -351,10 +355,12 @@ def test_terminal_input_is_not_lost_during_webchannel_or_session_startup():
 
 def test_terminal_prompt_colours_common_bash_root_prompt():
     session = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
-    assert "PS1=" in session
+    assert 'case "${PS1:-}" in' in session
+    assert "\\u@\\h:\\w\\$" in session
     assert "debian_chroot" in session
     assert "033[01;32m" in session
     assert "033[01;34m" in session
+
 def test_terminal_predictor_repairs_relative_directory_predictions():
     from app.terminal.predictor import CommandPredictor
 
