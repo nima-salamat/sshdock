@@ -354,8 +354,10 @@ def test_terminal_prompt_colours_common_bash_root_prompt():
     session = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     assert "\\u@\\h:\\w\\$" in session
     assert "debian_chroot" in session
-    assert "033[01;32m" in session
-    assert "033[01;34m" in session
+    assert "033[1;32m" in session
+    assert "033[1;36m" in session
+    assert "033[1;33m" in session
+    assert "*'@'*:*'# '" in session
 
 def test_terminal_predictor_repairs_relative_directory_predictions():
     from app.terminal.predictor import CommandPredictor
