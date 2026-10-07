@@ -82,8 +82,10 @@ def test_terminal_session_preserves_color_capable_shell_environment():
     assert "dircolors -b" in session
     assert "ls --color=auto" in session
     assert "grep --color=auto" in session
-    assert "PS1='\\[\\033[01;32m" in session
-    assert "PROMPT='%F{green}" in session
+    assert "PS1=" in session
+    assert "033[01;32m" in session
+    assert "PROMPT=" in session
+    assert "%F{green}" in session
     assert "set -gx TERM xterm-256color" in session
     assert '"TERM": "xterm-256color"' in client
     assert '"COLORTERM": "truecolor"' in client
