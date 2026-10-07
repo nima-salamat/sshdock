@@ -118,7 +118,6 @@ class TerminalSession(QObject):
         elif shell_name == "fish":
             setup = (
                 "set -gx TERM xterm-256color; set -gx COLORTERM truecolor; set -gx CLICOLOR 1; "
-                "if type -q dircolors; dircolors -c | source; end; "
                 "functions -q __sshdock_cwd; or function __sshdock_cwd --on-event fish_prompt; "
                 "printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; end; "
                 "__sshdock_cwd; "
