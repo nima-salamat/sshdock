@@ -97,6 +97,7 @@ class TerminalSession(QObject):
                 "if [ -n \"${PROMPT_COMMAND:-}\" ]; then PROMPT_COMMAND=\"__sshdock_cwd;${PROMPT_COMMAND}\"; "
                 "else PROMPT_COMMAND=\"__sshdock_cwd\"; fi;; esac; fi; "
                 "__sshdock_cwd; "
+                "alias ls >/dev/null 2>&1 || alias ls='ls --color=auto' 2>/dev/null; "
                 "alias ll >/dev/null 2>&1 || alias ll='ls -alF --color=auto' 2>/dev/null; "
                 "alias la >/dev/null 2>&1 || alias la='ls -A --color=auto' 2>/dev/null; "
                 "command -v dircolors >/dev/null 2>&1 && eval \"$(dircolors -b 2>/dev/null)\"; "
@@ -118,6 +119,9 @@ class TerminalSession(QObject):
         elif shell_name == "fish":
             setup = (
                 "set -gx TERM xterm-256color; set -gx COLORTERM truecolor; set -gx CLICOLOR 1; "
+                "functions -q ls; or function ls; command ls --color=auto $argv; end; "
+                "functions -q ll; or function ll; command ls -alF --color=auto $argv; end; "
+                "functions -q la; or function la; command ls -A --color=auto $argv; end; "
                 "functions -q __sshdock_cwd; or function __sshdock_cwd --on-event fish_prompt; "
                 "printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; end; "
                 "__sshdock_cwd; "
