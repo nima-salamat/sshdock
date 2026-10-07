@@ -170,6 +170,24 @@
     .sshdock-tbl td.st-down { color: #f85149; }
     .sshdock-tbl td.st-warn { color: #d29922; }
 
+    /* Predictive command ghost text. It is an overlay, never terminal content. */
+    #sshdock-ghost {
+      position: absolute;
+      z-index: 70;
+      pointer-events: none;
+      white-space: pre;
+      font-family: Cascadia Mono, Consolas, Menlo, monospace;
+      font-size: 13px;
+      line-height: 1.2;
+      color: rgba(148, 163, 184, 0.46);
+      opacity: 0;
+      transition: opacity 60ms linear;
+      overflow: hidden;
+      max-width: calc(100% - 26px);
+    }
+    #sshdock-ghost.visible { opacity: 1; }
+    #sshdock-ghost.light { color: rgba(71, 85, 105, 0.48); }
+
   </style>
 </head>
 <body>
@@ -240,7 +258,170 @@
       const fitAddon = FitCtor ? new FitCtor() : null;
       if (fitAddon) term.loadAddon(fitAddon);
 
-      term.open(document.getElementById('terminal'));
+      const terminalHost = document.getElementById('terminal');
+      term.open(terminalHost);
+
+      const ghost = document.createElement('div');
+      ghost.id = 'sshdock-ghost';
+      terminalHost.appendChild(ghost);
+
+      const completionContext = {
+        serverId: '',
+        cwd: '/',
+        shell: ''
+      };
+      let ghostCandidate = '';
+      let ghostSuffix = '';
+      let ghostRequestSeq = 0;
+      let inputModel = '';
+      let inputModelKnown = true;
+
+      function hideGhost() {
+        ghostCandidate = '';
+        ghostSuffix = '';
+        ghost.classList.remove('visible');
+        ghost.textContent = '';
+      }
+
+      function cellMetrics() {
+        try {
+          const d = term._core && term._core._renderService && term._core._renderService.dimensions;
+          const width = d && d.css && d.css.cell && d.css.cell.width;
+          const height = d && d.css && d.css.cell && d.css.cell.height;
+          return { width: width || 8, height: height || 16 };
+        } catch (e) {
+          return { width: 8, height: 16 };
+        }
+      }
+
+      function positionGhost() {
+        if (!ghostSuffix || !inputModelKnown) return;
+        const dims = cellMetrics();
+        const buf = term.buffer && term.buffer.active;
+        if (!buf || buf.type === 'alternate') {
+          hideGhost();
+          return;
+        }
+
+        const cursorX = Math.max(0, buf.cursorX || 0);
+        const cursorY = Math.max(0, buf.cursorY || 0);
+        const left = 4 + cursorX * dims.width;
+        const top = 4 + cursorY * dims.height;
+        const available = Math.max(0, terminalHost.clientWidth - left - 18);
+        if (available < Math.min(18, ghostSuffix.length * dims.width)) {
+          hideGhost();
+          return;
+        }
+        ghost.style.left = left + 'px';
+        ghost.style.top = top + 'px';
+        ghost.style.maxWidth = available + 'px';
+      }
+
+      function requestGhostPrediction() {
+        if (!inputModelKnown || !inputModel || !bridge || !bridge.predict_command) {
+          hideGhost();
+          return;
+        }
+        const seq = ++ghostRequestSeq;
+        try {
+          bridge.predict_command(
+            inputModel,
+            completionContext.cwd || '/',
+            completionContext.shell || '',
+            completionContext.serverId || '',
+            function (candidate) {
+              if (seq !== ghostRequestSeq) return;
+              const value = String(candidate || '');
+              if (!value || !value.toLowerCase().startsWith(inputModel.toLowerCase()) || value.length <= inputModel.length) {
+                hideGhost();
+                return;
+              }
+              ghostCandidate = value;
+              ghostSuffix = value.slice(inputModel.length);
+              ghost.textContent = ghostSuffix;
+              ghost.classList.add('visible');
+              positionGhost();
+            }
+          );
+        } catch (e) {
+          hideGhost();
+        }
+      }
+
+      function setInputModel(value, known) {
+        inputModel = value || '';
+        inputModelKnown = known !== false;
+        if (!inputModelKnown) {
+          hideGhost();
+          return;
+        }
+        requestGhostPrediction();
+      }
+
+      function observeInput(data) {
+        const value = String(data || '');
+        if (!value) return;
+
+        /* Printable insertion is only unambiguous at the local cursor. */
+        if (/^[\x20-\x7e]+$/.test(value)) {
+          inputModel += value;
+          requestGhostPrediction();
+          return;
+        }
+
+        if (value === '\x7f' || value === '\b') {
+          if (inputModel.length) {
+            inputModel = inputModel.slice(0, -1);
+            requestGhostPrediction();
+          } else {
+            hideGhost();
+          }
+          return;
+        }
+
+        if (value === '\r' || value === '\n') {
+          const submitted = inputModel;
+          hideGhost();
+          if (submitted && bridge && bridge.report_command) {
+            try { bridge.report_command(submitted); } catch (e) {}
+          }
+          inputModel = '';
+          inputModelKnown = true;
+          return;
+        }
+
+        /* Ctrl+U / Ctrl+C / Ctrl+D and readline cursor operations make a
+           local shadow buffer unreliable; fall back safely instead of
+           suggesting the wrong command. */
+        if (value.indexOf('\x03') >= 0 || value.indexOf('\x04') >= 0 || value.indexOf('\x15') >= 0) {
+          inputModel = '';
+          inputModelKnown = false;
+          hideGhost();
+          return;
+        }
+
+        if (value.indexOf('\x1b') >= 0 || value.indexOf('\t') >= 0) {
+          inputModelKnown = false;
+          hideGhost();
+          return;
+        }
+
+        /* Multiline paste and unknown control sequences invalidate the model
+           until the next explicit command boundary. */
+        if (value.indexOf('\n') >= 0 || value.indexOf('\r') >= 0) {
+          inputModel = '';
+          inputModelKnown = false;
+          hideGhost();
+          return;
+        }
+
+        inputModelKnown = false;
+        hideGhost();
+      }
+
+      function updateCompletionTheme(theme) {
+        ghost.classList.toggle('light', !!(theme && theme.background && String(theme.background).toLowerCase() !== '#080d13'));
+      }
 
       // The native xterm scrollbar is hidden because SSHDock renders it in a
       // dedicated gutter. Tell FitAddon not to reserve the hidden scrollbar a
@@ -469,6 +650,7 @@
       }
 
       term.onData(function (data) {
+        observeInput(data);
         if (bridge && bridge.send_input) bridge.send_input(data);
       });
 
@@ -478,11 +660,46 @@
           if (bridge && bridge.request_find) bridge.request_find();
           return false;
         }
+        if (ev.type === 'keydown' && ev.key === 'Tab' && ghostSuffix && inputModelKnown) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          try {
+            if (bridge && bridge.send_input) bridge.send_input(ghostSuffix);
+            inputModel += ghostSuffix;
+            hideGhost();
+          } catch (e) {
+            inputModelKnown = false;
+            hideGhost();
+          }
+          return false;
+        }
+        if (ev.type === 'keydown' && ev.key === 'Escape') {
+          hideGhost();
+        }
+        if (ev.type === 'keydown' && (ev.key === 'ArrowUp' || ev.key === 'ArrowDown' || ev.key === 'Home' || ev.key === 'End')) {
+          inputModelKnown = false;
+          hideGhost();
+        }
         return true;
       });
 
       window.sshdockTerm = {
         write: function (data) { term.write(data); },
+        setCompletionContext: function (data) {
+          try {
+            const value = data || {};
+            completionContext.serverId = String(value.serverId || '');
+            completionContext.cwd = String(value.cwd || '/');
+            completionContext.shell = String(value.shell || '');
+            if (inputModelKnown) requestGhostPrediction();
+          } catch (e) {
+            hideGhost();
+          }
+        },
+        setTheme: function (theme) {
+          try { updateCompletionTheme(theme || {}); } catch (e) {}
+          try { if (theme) term.options.theme = theme; } catch (e) {}
+        },
         clear: function () { term.clear(); term.write('\x1b[H\x1b[2J'); },
         focus: function () { term.focus(); },
         showTable: function (payload) {
