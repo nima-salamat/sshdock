@@ -39,6 +39,11 @@ def test_terminal_html_preserves_whitespace_in_ghost_display():
     assert "ghostSuffix = value.slice(inputModel.length)" in src
 
 
+def test_terminal_html_preserves_ansi_colors():
+    src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    assert "minimumContrastRatio: 1" in src
+
+
 def test_terminal_session_preserves_color_capable_shell_environment():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     assert 'TERM=\"xterm-256color\"' in src
