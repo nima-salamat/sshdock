@@ -475,7 +475,7 @@
       function reportSize() {
         if (!fitAddon) return;
         try { fitAddon.fit(); } catch (e) {}
-        syncScrollBar();
+        reportScrollState();
         const cols = term.cols, rows = term.rows;
         if (cols === lastCols && rows === lastRows) return;
         lastCols = cols; lastRows = rows;
@@ -489,9 +489,10 @@
         fitTimer = setTimeout(function () {
           reportSize();
           try { if (window._sshdockSync) window._sshdockSync(); } catch (e) {}
+          reportScrollState();
           requestAnimationFrame(function () {
-            syncScrollBar();
             try { if (window._sshdockSync) window._sshdockSync(); } catch (e) {}
+            reportScrollState();
           });
         }, 80);
       }
@@ -798,7 +799,7 @@
               requestAnimationFrame(window._sshdockSync);
             }
           } catch (e) {}
-          syncScrollBar();
+          reportScrollState();
           reportSize();
         },
 
