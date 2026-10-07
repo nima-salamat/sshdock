@@ -119,6 +119,7 @@ class ContainersPage(QWidget):
             selection_mode=QAbstractItemView.SelectionMode.ExtendedSelection,
             sorting=False,
         )
+        self.table.install_standard_context_menu()
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(40)
         self.table.verticalHeader().setMinimumSectionSize(32)

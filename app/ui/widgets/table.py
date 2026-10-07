@@ -198,8 +198,6 @@ class StandardTableWidget(QTableWidget):
         for column in range(self.columnCount()):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
 
-        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.customContextMenuRequested.connect(self._context_menu)
         self._copy_shortcut = QAction(self)
         self._copy_shortcut.setShortcut(QKeySequence.StandardKey.Copy)
         self._copy_shortcut.triggered.connect(self.copy_selection)
@@ -428,6 +426,14 @@ class StandardTableWidget(QTableWidget):
                 for col in range(self.columnCount())
             ))
         QApplication.clipboard().setText("\n".join(lines))
+
+    def install_standard_context_menu(self) -> None:
+        """Install the common copy/select/auto-fit menu unless the page owns one."""
+        if self.property("_sshdock_standard_context_menu"):
+            return
+        self.setProperty("_sshdock_standard_context_menu", True)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._context_menu)
 
     def _context_menu(self, pos: QPoint) -> None:
         menu = QMenu(self)

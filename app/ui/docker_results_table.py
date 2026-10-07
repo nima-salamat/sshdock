@@ -77,6 +77,7 @@ class DockerResultsTable(QWidget):
             selection_mode=QAbstractItemView.SelectionMode.ExtendedSelection,
             sorting=True,
         )
+        self.table.install_standard_context_menu()
         self.table.refreshStarted.connect(lambda: self._set_refresh_ui(True))
         self.table.refreshFinished.connect(lambda ok: self._set_refresh_ui(False, ok))
         self.auto_refresh.intervalChanged.connect(self.table.configure_auto_refresh)
