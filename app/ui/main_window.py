@@ -41,6 +41,7 @@ from app.ui.dialogs import ErrorDialog, ConfirmRemoveDialog
 from app.files.highlighter import CodeHighlighter
 from app.ui.container_details import ContainerDetailsWindow
 from app.ui.widgets import NavButton, MetricCard, icon_button, AutoRefreshControl, TableAutoRefresh
+from app.ui.widgets.table import StandardTableWidget
 from app.ui.resource_monitor import ResourceMonitorDialog
 from app.workers.task_manager import TaskManager
 
@@ -117,6 +118,7 @@ class MainWindow(QMainWindow):
         # Prevent concurrent terminal-creation coroutines from racing before
         # SessionManager registers the newly opened session in self.terms.
         self._terminal_creation_in_progress = False
+        self._server_generation = 0
         self.setWindowTitle("SSHDock — Docker over SSH")
         self.resize(1480, 930)
         self.setMinimumSize(QSize(960, 600))
@@ -424,7 +426,7 @@ class MainWindow(QMainWindow):
         lay.addLayout(grid)
         proc_panel = QFrame(); proc_panel.setObjectName("panel"); proc_lay = QVBoxLayout(proc_panel); proc_lay.setContentsMargins(14, 12, 14, 12)
         r=QHBoxLayout(); lbl=QLabel("Host processes"); lbl.setObjectName("panelTitle"); r.addWidget(lbl); r.addStretch(); self.overview_proc_meta=QLabel("Top CPU processes"); self.overview_proc_meta.setObjectName("muted"); r.addWidget(self.overview_proc_meta); proc_lay.addLayout(r)
-        self.overview_processes=QTableWidget(0,6); self.overview_processes.setHorizontalHeaderLabels(["PID","USER","CPU %","MEM %","STATE","COMMAND"]); self.overview_processes.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows); self.overview_processes.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers); self.overview_processes.verticalHeader().setVisible(False); self.overview_processes.setAlternatingRowColors(True)
+        self.overview_processes=StandardTableWidget(0,6); self.overview_processes.setHorizontalHeaderLabels(["PID","USER","CPU %","MEM %","STATE","COMMAND"]); self.overview_processes.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows); self.overview_processes.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers); self.overview_processes.verticalHeader().setVisible(False); self.overview_processes.setAlternatingRowColors(True)
         self.overview_processes.setColumnWidth(0,80); self.overview_processes.setColumnWidth(1,100); self.overview_processes.setColumnWidth(2,75); self.overview_processes.setColumnWidth(3,75); self.overview_processes.setColumnWidth(4,90); self.overview_processes.setColumnWidth(5,280)
         self._make_columns_resizable(self.overview_processes, stretch_cols={5})
         proc_lay.addWidget(self.overview_processes,1); lay.addWidget(proc_panel,1)
@@ -647,7 +649,7 @@ class MainWindow(QMainWindow):
         lay.addLayout(summary)
 
         # Main stats table.
-        self.stats_table = QTableWidget(0, 8)
+        self.stats_table = StandardTableWidget(0, 8)
         self.stats_table.setHorizontalHeaderLabels(
             ["Name", "CPU %", "Mem %", "Memory", "Net I/O", "Block I/O", "PIDs", "Quota"]
         )
@@ -741,7 +743,7 @@ class MainWindow(QMainWindow):
         page=QWidget(); lay=QVBoxLayout(page);
         page._layout_owner = lay; lay.setContentsMargins(24,20,24,24)
         row=QHBoxLayout(); title=QLabel("Images"); title.setObjectName("heroTitle"); row.addWidget(title); row.addStretch(); self.image_search=QLineEdit(); self._install_copy_context(self.image_search); self.image_search.setPlaceholderText("Search images…"); self.image_search.setMaximumWidth(260); self.image_search.textChanged.connect(self._filter_images); row.addWidget(self.image_search); pull=QPushButton("Pull image"); pull.setProperty("accent",True); pull.clicked.connect(self._pull_image); row.addWidget(pull); refresh=QPushButton("↻"); refresh.clicked.connect(lambda:self._spawn(self.load_images())); row.addWidget(refresh); lay.addLayout(row)
-        self.image_table=QTableWidget(0,6); self.image_table.setHorizontalHeaderLabels(["Used","Repository","Tag","ID","Size","Actions"]); self.image_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows); self.image_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection); self.image_table.verticalHeader().setVisible(False); self.image_table.verticalHeader().setDefaultSectionSize(38); self.image_table.setColumnWidth(0,56); self.image_table.setColumnWidth(1,240); self.image_table.setColumnWidth(2,100); self.image_table.setColumnWidth(3,140); self.image_table.setColumnWidth(4,100); self.image_table.setColumnWidth(5,110); self._make_columns_resizable(self.image_table, stretch_cols={1}); self.image_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu); self.image_table.customContextMenuRequested.connect(lambda pos:self._table_context_menu(self.image_table,pos));
+        self.image_table=StandardTableWidget(0,6); self.image_table.setHorizontalHeaderLabels(["Used","Repository","Tag","ID","Size","Actions"]); self.image_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows); self.image_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection); self.image_table.verticalHeader().setVisible(False); self.image_table.verticalHeader().setDefaultSectionSize(38); self.image_table.setColumnWidth(0,56); self.image_table.setColumnWidth(1,240); self.image_table.setColumnWidth(2,100); self.image_table.setColumnWidth(3,140); self.image_table.setColumnWidth(4,100); self.image_table.setColumnWidth(5,110); self._make_columns_resizable(self.image_table, stretch_cols={1}); self.image_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu); self.image_table.customContextMenuRequested.connect(lambda pos:self._table_context_menu(self.image_table,pos));
         img_bar=QHBoxLayout(); self.image_selected=QLabel("0 selected"); self.image_selected.setObjectName("metricHeading"); img_bar.addWidget(self.image_selected); des=QPushButton("Deselect"); des.clicked.connect(lambda: (self._deselect_table(self.image_table), self.image_selected.setText("0 selected"))); img_bar.addWidget(des); img_bar.addStretch()
         rm_sel=QPushButton("Remove selected"); rm_sel.setToolTip("Remove selected images"); rm_sel.clicked.connect(lambda: self._spawn(self._bulk_remove_images())); img_bar.addWidget(rm_sel)
         purge_img=QPushButton("Purge unused"); purge_img.setToolTip("docker image prune -f (dangling images)"); purge_img.setProperty("danger", True); purge_img.clicked.connect(lambda: self._spawn(self._prune_resource("image"))); img_bar.addWidget(purge_img)
@@ -752,8 +754,8 @@ class MainWindow(QMainWindow):
         page._layout_owner = lay; lay.setContentsMargins(24,20,24,24)
         title=QLabel("Storage"); title.setObjectName("heroTitle"); lay.addWidget(title)
         tabs=QTabWidget()
-        self.volume_table=QTableWidget(0,5); self.volume_table.setHorizontalHeaderLabels(["Name","Driver","Scope","Used by","Actions"])
-        self.network_table=QTableWidget(0,6); self.network_table.setHorizontalHeaderLabels(["Name","Driver","Scope","Used by","ID","Actions"])
+        self.volume_table=StandardTableWidget(0,5); self.volume_table.setHorizontalHeaderLabels(["Name","Driver","Scope","Used by","Actions"])
+        self.network_table=StandardTableWidget(0,6); self.network_table.setHorizontalHeaderLabels(["Name","Driver","Scope","Used by","ID","Actions"])
         for t in (self.volume_table, self.network_table):
             t.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
             t.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -825,7 +827,7 @@ class MainWindow(QMainWindow):
         lay.addLayout(toolbar)
 
         panel=QFrame(); panel.setObjectName("panel"); pl=QVBoxLayout(panel); pl.setContentsMargins(12,12,12,12)
-        self.compose_table=QTableWidget(0,5)
+        self.compose_table=StandardTableWidget(0,5)
         self.compose_table.setHorizontalHeaderLabels(["","Project","Status","Config files","Actions"])
         self.compose_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.compose_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -1088,13 +1090,13 @@ class MainWindow(QMainWindow):
         )
         refresh=QToolButton(); refresh.setText("Refresh"); refresh.setToolTip("Refresh server information"); refresh.clicked.connect(lambda _=False:self._spawn(self.refresh_server_page())); header.addWidget(refresh); lay.addLayout(header)
         self.server_tabs=QTabWidget()
-        self.server_overview_table=QTableWidget(0,3); self.server_overview_table.setHorizontalHeaderLabels(["Metric","Value","Copy"]); self._prep_info_table(self.server_overview_table)
+        self.server_overview_table=StandardTableWidget(0,3); self.server_overview_table.setHorizontalHeaderLabels(["Metric","Value","Copy"]); self._prep_info_table(self.server_overview_table)
         self.server_overview_table.setColumnWidth(0,200); self.server_overview_table.setColumnWidth(1,400); self.server_overview_table.setColumnWidth(2,80)
         self._make_columns_resizable(self.server_overview_table, stretch_cols={1})
         self.server_overview_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu); self.server_overview_table.customContextMenuRequested.connect(lambda pos:self._server_info_context(self.server_overview_table,pos))
         self.server_tabs.addTab(self.server_overview_table,"Overview")
-        self.process_table=QTableWidget(0,7); self.process_table.setHorizontalHeaderLabels(["PID","User","CPU %","MEM %","State","Command","Actions"]); self._prep_info_table(self.process_table); self.process_table.setColumnWidth(0,80); self.process_table.setColumnWidth(1,120); self.process_table.setColumnWidth(2,75); self.process_table.setColumnWidth(3,75); self.process_table.setColumnWidth(4,90); self.process_table.setColumnWidth(5,280); self.process_table.setColumnWidth(6,115); self._make_columns_resizable(self.process_table, stretch_cols={5}); self.process_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu); self.process_table.customContextMenuRequested.connect(self._process_context_menu); self.server_tabs.addTab(self.process_table,"Processes")
-        self.service_table=QTableWidget(0,6); self.service_table.setHorizontalHeaderLabels(["Service","Load","Active","Sub","Description","Actions"]); self._prep_info_table(self.service_table); self.service_table.setColumnWidth(0,230); self.service_table.setColumnWidth(1,80); self.service_table.setColumnWidth(2,90); self.service_table.setColumnWidth(3,90); self.service_table.setColumnWidth(4,260); self.service_table.setColumnWidth(5,130); self._make_columns_resizable(self.service_table, stretch_cols={4}); self.service_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu); self.service_table.customContextMenuRequested.connect(self._service_context_menu); self.server_tabs.addTab(self.service_table,"Services")
+        self.process_table=StandardTableWidget(0,7); self.process_table.setHorizontalHeaderLabels(["PID","User","CPU %","MEM %","State","Command","Actions"]); self._prep_info_table(self.process_table); self.process_table.setColumnWidth(0,80); self.process_table.setColumnWidth(1,120); self.process_table.setColumnWidth(2,75); self.process_table.setColumnWidth(3,75); self.process_table.setColumnWidth(4,90); self.process_table.setColumnWidth(5,280); self.process_table.setColumnWidth(6,115); self._make_columns_resizable(self.process_table, stretch_cols={5}); self.process_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu); self.process_table.customContextMenuRequested.connect(self._process_context_menu); self.server_tabs.addTab(self.process_table,"Processes")
+        self.service_table=StandardTableWidget(0,6); self.service_table.setHorizontalHeaderLabels(["Service","Load","Active","Sub","Description","Actions"]); self._prep_info_table(self.service_table); self.service_table.setColumnWidth(0,230); self.service_table.setColumnWidth(1,80); self.service_table.setColumnWidth(2,90); self.service_table.setColumnWidth(3,90); self.service_table.setColumnWidth(4,260); self.service_table.setColumnWidth(5,130); self._make_columns_resizable(self.service_table, stretch_cols={4}); self.service_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu); self.service_table.customContextMenuRequested.connect(self._service_context_menu); self.server_tabs.addTab(self.service_table,"Services")
 
         files=QWidget(); fl=QVBoxLayout(files); fl.setContentsMargins(8,8,8,8)
         self.server_file_browser = RemoteFileBrowser(ServerFileBackend(lambda: self.manager.servers[self.current_id].ssh), "Server Files")
@@ -1495,7 +1497,7 @@ class MainWindow(QMainWindow):
         desc.setObjectName("muted")
         sp.addWidget(desc)
 
-        self.shortcuts_table = QTableWidget(0, 2)
+        self.shortcuts_table = StandardTableWidget(0, 2)
         self.shortcuts_table.setHorizontalHeaderLabels(["Action", "Shortcut"])
         self.shortcuts_table.verticalHeader().setVisible(False)
         self.shortcuts_table.setAlternatingRowColors(True)
@@ -1528,7 +1530,7 @@ class MainWindow(QMainWindow):
         cancel_all.clicked.connect(self._cancel_all_tasks_from_ui)
         tt.addWidget(cancel_all)
         tp.addLayout(tt)
-        self.task_table = QTableWidget(0, 5)
+        self.task_table = StandardTableWidget(0, 5)
         self.task_table.setHorizontalHeaderLabels(["Task", "Status", "Duration", "Error", "Action"])
         self.task_table.verticalHeader().setVisible(False)
         self.task_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -1903,9 +1905,18 @@ class MainWindow(QMainWindow):
             idx=self.server_picker.findData(self.current_id)
             if idx>=0: self.server_picker.setCurrentIndex(idx)
 
+    def _is_current_server_generation(self, server_id: str, generation: int) -> bool:
+        return bool(
+            server_id
+            and self.current_id == server_id
+            and self._server_generation == generation
+            and server_id in self.manager.servers
+        )
+
     def _server_selected(self,index):
         sid=self.server_picker.itemData(index)
         if sid and sid!=self.current_id:
+            self._server_generation += 1
             self.current_id=sid; self._update_identity()
             previous = getattr(self, "_page_refresh_task", None)
             if previous is not None and not previous.done():

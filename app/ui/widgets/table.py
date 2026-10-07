@@ -461,9 +461,8 @@ class StandardTable(QWidget):
             auto_refresh_seconds=auto_refresh_seconds,
             parent=self,
         )
-        self.table = StandardTableWidget(0, len(list(columns)), self)
-        # Re-create from the iterable because generators are one-shot.
         self.columns = list(columns)
+        self.table = StandardTableWidget(0, len(self.columns), self)
         self.table.configure_columns(self.columns)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
