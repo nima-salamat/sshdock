@@ -24,12 +24,13 @@ def test_terminal_html_has_ghost_completion_and_tab_acceptance():
 
 def test_terminal_html_keeps_xterm_scrollbar_visible():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
-    assert "scrollbar-width: thin" in src
-    assert "scrollbar-width: none" not in src
-    assert "::-webkit-scrollbar-thumb" in src
-    assert "width: 11px" in src
-    assert "scrollBarWidth = 0" not in src
-    assert "sshdock-scrollbar" not in src
+    assert "id="sshdock-scroll-gutter"" in src
+    assert "id="sshdock-scroll-thumb"" in src
+    assert "scrollbar-width: none" in src
+    assert "scrollBarWidth = 0" in src
+    assert "pointerdown" in src
+    assert "term.scrollToLine" in src
+    assert "padding-right: 18px" in src
 
 
 def test_terminal_html_allows_ghost_acceptance_with_tab_or_arrow_right():
