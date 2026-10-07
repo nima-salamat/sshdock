@@ -101,7 +101,6 @@ class TerminalSession(QObject):
                 "alias ll >/dev/null 2>&1 || alias ll='ls -alF --color=auto' 2>/dev/null; "
                 "alias la >/dev/null 2>&1 || alias la='ls -A --color=auto' 2>/dev/null; "
                 "command -v dircolors >/dev/null 2>&1 && eval \"$(dircolors -b 2>/dev/null)\"; "
-                "printf '\\r\\033[K'\\r"
             )
         elif shell_name == "zsh":
             setup = (
@@ -115,7 +114,6 @@ class TerminalSession(QObject):
                 "alias ls >/dev/null 2>&1 || alias ls='ls --color=auto' 2>/dev/null; "
                 "alias ll >/dev/null 2>&1 || alias ll='ls -alF --color=auto' 2>/dev/null; "
                 "alias la >/dev/null 2>&1 || alias la='ls -A --color=auto' 2>/dev/null; "
-                "printf '\\r\\033[K'\\r"
             )
         elif shell_name == "fish":
             setup = (
@@ -132,61 +130,57 @@ class TerminalSession(QObject):
             setup = ""
         echo_disabled = False
         try:
-            # Temporarily disable PTY echo while SSHDock installs integration.
+            # First switch echo off in isolation; otherwise the PTY can echo the
+            # remainder of the installation payload before stty takes effect.
             await asyncio.wait_for(
                 self.channel.write(b"stty -echo 2>/dev/null\r"),
                 timeout=2.0,
             )
             echo_disabled = True
             await asyncio.sleep(0.04)
-            await asyncio.wait_for(
-                self.channel.write(b"printf '\r\033[K'\r"),
-                timeout=2.0,
-            )
-            await asyncio.sleep(0.02)
 
-            # Keep prompt decoration separate from mdocker installation.
+            from app.terminal.docker_pretty import install_command
+            pretty = install_command(manage_echo=False)
+
+            parts = []
             if setup:
-                try:
-                    await asyncio.wait_for(
-                        self.channel.write((setup + "\r").encode("utf-8")),
-                        timeout=4.0,
-                    )
-                except Exception:
-                    pass
+                parts.append(setup)
+            parts.append(pretty)
+            # Restore echo inside the same shell command, then clear everything
+            # SSHDock used during bootstrap. The user's configured prompt is
+            # rendered once, after this command returns.
+            parts.append("stty echo 2>/dev/null")
+            parts.append("printf '\\033[2J\\033[H'")
+            payload = "; ".join(parts) + "\r"
 
-            try:
-                from app.terminal.docker_pretty import install_command
-                pretty = install_command(manage_echo=False) + "\r"
-                await asyncio.sleep(0.05)
-                await asyncio.wait_for(
-                    self.channel.write(pretty.encode("utf-8")),
-                    timeout=4.0,
-                )
-            except Exception:
-                pass
+            await asyncio.wait_for(
+                self.channel.write(payload.encode("utf-8")),
+                timeout=6.0,
+            )
+            # The payload itself restores echo even if an individual setup part
+            # fails because commands are chained with ';'.
+            echo_disabled = False
+            await asyncio.sleep(0.05)
         except Exception:
-            # If PTY echo could not be disabled, don't leave a partial setup.
-            if echo_disabled:
-                try:
-                    await asyncio.wait_for(
-                        self.channel.write(b"stty echo 2>/dev/null\r"),
-                        timeout=2.0,
-                    )
-                except Exception:
-                    pass
-            return
-        finally:
             if echo_disabled and self.channel and not self.channel.closed:
                 try:
-                    # Always restore normal interactive PTY echo.
                     await asyncio.wait_for(
                         self.channel.write(
-                            b"stty echo 2>/dev/null; printf '\r\033[K'\r"
+                            b"stty echo 2>/dev/null; printf '\\033[2J\\033[H'\r"
                         ),
                         timeout=2.0,
                     )
-                    await asyncio.sleep(0.03)
+                except Exception:
+                    pass
+        finally:
+            if echo_disabled and self.channel and not self.channel.closed:
+                try:
+                    await asyncio.wait_for(
+                        self.channel.write(
+                            b"stty echo 2>/dev/null; printf '\\033[2J\\033[H'\r"
+                        ),
+                        timeout=2.0,
+                    )
                 except Exception:
                     pass
 
