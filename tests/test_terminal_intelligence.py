@@ -32,6 +32,18 @@ def test_terminal_html_keeps_xterm_scrollbar_visible():
     assert "sshdock-scrollbar" not in src
 
 
+def test_terminal_html_allows_ghost_acceptance_with_tab_or_arrow_right():
+    src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    assert "(ev.key === 'Tab' || ev.key === 'ArrowRight')" in src
+    assert "ghostSuffix && inputModelKnown" in src
+
+
+def test_terminal_session_restores_pty_echo_after_integration():
+    src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
+    assert 'self.channel.write(b"stty -echo 2>/dev/null\\r")' in src
+    assert 'b"stty echo 2>/dev/null; printf \'\\r\\033[K\'\\r"' in src
+
+
 def test_terminal_html_disables_ghost_completion_for_alternate_screen():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
     assert "buf.type === 'alternate'" in src
