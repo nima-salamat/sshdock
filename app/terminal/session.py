@@ -124,7 +124,7 @@ class TerminalSession(QObject):
                 "functions -q __sshdock_cwd; or function __sshdock_cwd --on-event fish_prompt; "
                 "printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; end; "
                 "__sshdock_cwd; "
-                "printf '\\r\\033[K'\\r"
+
             )
         else:
             setup = ""
