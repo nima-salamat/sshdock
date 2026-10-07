@@ -33,4 +33,4 @@ def test_fish_shell_has_a_native_mdocker_integration():
     assert "DOCKER_PRETTY_FISH" in docker
     assert "function __sshdock_magic" in docker
     assert "function mdocker" in docker
-    assert "source_command(shell_name)" in (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
+    assert "install_command(shell_name=shell_name, manage_echo=False)" in (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")

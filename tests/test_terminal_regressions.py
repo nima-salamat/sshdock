@@ -130,7 +130,7 @@ def test_mdocker_bootstrap_is_prepared_outside_the_interactive_pty():
     assert "await self._prepare_shell_integration()" in src
     assert "async def _prepare_shell_integration(self) -> None:" in src
     assert "prepare_command()" in src
-    assert "source_command(shell_name)" in src
+    assert "install_command(shell_name=shell_name, manage_echo=False)" in src
     assert 'SH_SCRIPT_PATH = "$HOME/.cache/sshdock/docker.sh"' in docker
     assert 'umask 077' in docker
     assert 'chmod 700 "$HOME/.cache/sshdock"' in docker
@@ -352,7 +352,7 @@ def test_terminal_input_is_not_lost_during_webchannel_or_session_startup():
 
 def test_terminal_prompt_colours_common_bash_root_prompt():
     session = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
-    assert "\\u@\\h:\\w\\$" in session
+    assert "__sshdock_apply_prompt" in session
     assert "debian_chroot" in session
     assert "033[1;32m" in session
     assert "033[1;36m" in session
@@ -387,7 +387,8 @@ def test_terminal_prompt_setup_has_no_unbalanced_bash_case():
     block = session[session.index('        if shell_name == "bash":'):session.index('        elif shell_name == "zsh":')]
     assert "__sshdock_apply_prompt(){" in block
     assert ";; esac; };" in block
-    assert ";; esac; fi;" in block
+    assert "else " in block
+    assert "fi; " in block
 
 def test_terminal_prompt_matches_literal_root_prompt_shape():
     session = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
@@ -395,3 +396,44 @@ def test_terminal_prompt_matches_literal_root_prompt_shape():
     assert "033[1;32m" in session
     assert "033[1;36m" in session
     assert "033[1;33m" in session
+
+
+def test_bash_prompt_setup_is_syntactically_valid():
+    import ast
+    import subprocess
+
+    session = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
+    tree = ast.parse(session)
+    start_line = session[:session.index('        if shell_name == "bash":')].count("\n") + 1
+    end_line = session[:session.index('        elif shell_name == "zsh":')].count("\n") + 1
+    setup_node = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "setup" for target in node.targets)
+        and start_line <= node.lineno < end_line
+    )
+    setup = ast.literal_eval(setup_node.value)
+
+    syntax = subprocess.run(
+        ["bash", "-n"],
+        input=setup,
+        text=True,
+        capture_output=True,
+        timeout=3,
+        check=False,
+    )
+    assert syntax.returncode == 0, syntax.stderr
+
+    probe = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-c", "PS1='root@TG-52087:~# '\n" + setup + "\nprintf '%s' \"$PS1\""],
+        text=True,
+        capture_output=True,
+        timeout=3,
+        check=False,
+    )
+    assert probe.returncode == 0, probe.stderr
+    assert "\\u@\\h" in probe.stdout
+    assert "\\033[1;32m" in probe.stdout
+    assert "\\033[1;36m" in probe.stdout
+    assert "\\033[1;33m" in probe.stdout

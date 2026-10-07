@@ -67,7 +67,7 @@ def test_terminal_html_preserves_ansi_colors():
 def test_terminal_session_hides_bootstrap_commands_and_clears_screen():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     assert 'payload = "; ".join(parts)' in src
-    assert "source_command(shell_name)" in src
+    assert "install_command(shell_name=shell_name, manage_echo=False)" in src
     assert "033[2J" in src
     assert "033[H" in src
     assert "stty echo 2>/dev/null" in src
@@ -83,7 +83,9 @@ def test_terminal_session_preserves_color_capable_shell_environment():
     assert "ls --color=auto" in session
     assert "grep --color=auto" in session
     assert "PS1=" in session
-    assert "033[01;32m" in session
+    assert "033[1;32m" in session
+    assert "033[1;36m" in session
+    assert "033[1;33m" in session
     assert "PROMPT=" in session
     assert "%F{green}" in session
     assert "set -gx TERM xterm-256color" in session
