@@ -33,7 +33,7 @@ def test_predictor_recency_and_determinism():
 
 def test_predictor_context_transition():
     predictor = CommandPredictor()
-    predictor.ingest(["docker compose up", "docker compose ps"] * 3)
+    predictor.ingest(["docker compose up", "docker compose ps", "docker compose up"] * 3)
     assert predictor.suggest("docker c") == "docker compose ps"
 
 

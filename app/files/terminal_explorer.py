@@ -95,7 +95,11 @@ class _QueueRowWidget(QWidget):
         app = QApplication.instance()
         theme = str(app.property("sshdockTheme") if app is not None else "dark").lower()
         remove_color = "#64748b" if theme == "light" else "#aebccc"
-        remove_btn.setIcon(_queue_icon("fa5s.times"))
+        try:
+            import qtawesome as qta
+            remove_btn.setIcon(qta.icon("fa5s.times", color=remove_color))
+        except Exception:
+            remove_btn.setIcon(_queue_icon("fa5s.times"))
         remove_btn.setIconSize(QSize(12, 12))
         remove_btn.clicked.connect(self.removed.emit)
         layout.addWidget(remove_btn)

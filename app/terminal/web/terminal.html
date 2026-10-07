@@ -192,7 +192,7 @@
 </head>
 <body>
   <div id="term-root">
-    <div id="terminal"></div>
+    <div id="terminal"><div id="sshdock-ghost" aria-hidden="true"></div></div>
     <div id="sshdock-scrollbar" hidden aria-label="Terminal scroll bar">
       <div id="sshdock-scrollbar-thumb"></div>
     </div>
@@ -261,9 +261,8 @@
       const terminalHost = document.getElementById('terminal');
       term.open(terminalHost);
 
-      const ghost = document.createElement('div');
-      ghost.id = 'sshdock-ghost';
-      terminalHost.appendChild(ghost);
+      const ghost = document.getElementById('sshdock-ghost') || document.createElement('div');
+      if (!ghost.parentNode) terminalHost.appendChild(ghost);
 
       const completionContext = {
         serverId: '',
