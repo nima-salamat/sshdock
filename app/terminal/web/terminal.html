@@ -859,6 +859,7 @@
           window.sshdockTerm.ready = true;
           scheduleFit();
           if (bridge && bridge.js_ready) bridge.js_ready();
+          reportScrollState();
           // Flush any cwd reported before the bridge was ready
           if (bridge && bridge.report_cwd && window.sshdockReportCwd) {
             try { bridge.report_cwd(window.sshdockReportCwd); } catch (e) {}
