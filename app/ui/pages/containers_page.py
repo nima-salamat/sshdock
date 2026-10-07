@@ -14,14 +14,13 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from app.docker.models import ContainerInfo
-from app.ui.widgets import AutoRefreshControl
+from app.ui.widgets.table import ColumnSpec, StandardTableWidget
 
 
 class ContainersPage(QWidget):
@@ -58,7 +57,7 @@ class ContainersPage(QWidget):
         self._remove_one = remove_one
         self._rows: list[dict[str, Any]] = []
         self._syncing_selection = False
-        self.auto_refresh = AutoRefreshControl(5)
+        self.auto_refresh = None
         self._build(make_columns_resizable)
 
     def _build(self, make_columns_resizable: Callable | None) -> None:
@@ -71,10 +70,12 @@ class ContainersPage(QWidget):
         title.setObjectName("heroTitle")
         header.addWidget(title)
         header.addStretch()
-        header.addStretch()
+        from app.ui.widgets.table import TableToolbar
+        self.table_toolbar = TableToolbar("Containers", auto_refresh_seconds=5, parent=self)
+        self.auto_refresh = self.table_toolbar.auto_refresh
+        self.table_toolbar.refreshRequested.connect(self.refresh_requested.emit)
         header.addWidget(self.auto_refresh)
-        refresh = QPushButton("Refresh")
-        refresh.clicked.connect(self.refresh_requested.emit)
+        refresh = self.table_toolbar.refresh_button
         header.addWidget(refresh)
         new = QPushButton("New container")
         new.setProperty("accent", True)
@@ -103,8 +104,21 @@ class ContainersPage(QWidget):
         tools.addWidget(clear)
         lay.addLayout(tools)
 
-        self.table = QTableWidget(0, 7)
-        self.table.setHorizontalHeaderLabels(["", "Status", "Name", "Image", "Ports", "State", "Actions"])
+        self.table = StandardTableWidget(0, 7)
+        self.table.configure_columns([
+            ColumnSpec("", key="selected", default_width=36, min_width=30, sortable=False),
+            ColumnSpec("Status", key="status", default_width=58, min_width=48),
+            ColumnSpec("Name", key="name", default_width=220),
+            ColumnSpec("Image", key="image", default_width=220),
+            ColumnSpec("Ports", key="ports", default_width=180),
+            ColumnSpec("State", key="state", default_width=150),
+            ColumnSpec("Actions", key="actions", default_width=120, sortable=False, copyable=False),
+        ])
+        self.table.configure_standard(
+            selection_behavior=QAbstractItemView.SelectionBehavior.SelectRows,
+            selection_mode=QAbstractItemView.SelectionMode.ExtendedSelection,
+            sorting=False,
+        )
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(40)
         self.table.verticalHeader().setMinimumSectionSize(32)
@@ -112,13 +126,6 @@ class ContainersPage(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setWordWrap(False)
-        self.table.setColumnWidth(0, 36)
-        self.table.setColumnWidth(1, 58)
-        self.table.setColumnWidth(2, 220)
-        self.table.setColumnWidth(3, 220)
-        self.table.setColumnWidth(4, 180)
-        self.table.setColumnWidth(5, 150)
-        self.table.setColumnWidth(6, 120)
         if make_columns_resizable:
             make_columns_resizable(self.table, stretch_cols={3, 4})
         else:
