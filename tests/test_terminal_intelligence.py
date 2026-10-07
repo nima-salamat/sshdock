@@ -58,6 +58,11 @@ def test_predictor_repairs_missing_shell_separator_for_cd_path_predictions():
 def test_terminal_html_preserves_ansi_colors():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
     assert "minimumContrastRatio: 1" in src
+    assert "rgba(148, 163, 184, 0.72)" in src
+    assert "ghostAnchorX" in src
+    assert "scheduleGhostPosition" in src
+    assert "getBoundingClientRect()" in src
+    assert "cursorX >= ghostAnchorX" in src
 
 
 
@@ -86,6 +91,8 @@ def test_terminal_session_preserves_color_capable_shell_environment():
     assert "033[1;32m" in session
     assert "033[1;36m" in session
     assert "033[1;33m" in session
+    assert "033[0;90m" in session
+    assert "033[1;34m" in session
     assert "PROMPT=" in session
     assert "%F{green}" in session
     assert "set -gx TERM xterm-256color" in session

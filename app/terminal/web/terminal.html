@@ -161,7 +161,9 @@
       font-family: Cascadia Mono, Consolas, Menlo, monospace;
       font-size: 13px;
       line-height: 1.2;
-      color: rgba(148, 163, 184, 0.46);
+      color: rgba(148, 163, 184, 0.72);
+      font-style: normal;
+      letter-spacing: 0;
       opacity: 0;
       transition: opacity 60ms linear;
       overflow: hidden;
@@ -169,7 +171,7 @@
     }
     #sshdock-ghost.visible { opacity: 1; }
     #sshdock-ghost .ghost-gap { display:inline-block; height:1em; vertical-align:top; }
-    #sshdock-ghost.light { color: rgba(71, 85, 105, 0.48); }
+    #sshdock-ghost.light { color: rgba(71, 85, 105, 0.68); }
 
   </style>
 </head>
@@ -252,6 +254,7 @@
       let ghostCandidate = '';
       let ghostSuffix = '';
       let ghostRequestSeq = 0;
+      let ghostAnchorX = null;
       let inputModel = '';
       let inputModelKnown = true;
 
@@ -282,10 +285,29 @@
           return;
         }
 
-        const cursorX = Math.max(0, buf.cursorX || 0);
-        const cursorY = Math.max(0, buf.cursorY || 0);
-        const left = 4 + cursorX * dims.width;
-        const top = 4 + cursorY * dims.height;
+        /*
+         * xterm receives the local key through onData before the remote shell
+         * echoes it back. During that interval cursorX still points at the
+         * previous cell, making the ghost look one character too far left.
+         * Use a temporary expected cursor anchor until xterm catches up.
+         */
+        const actualCursorX = Math.max(0, Number(buf.cursorX) || 0);
+        const cursorX = Math.max(
+          actualCursorX,
+          ghostAnchorX == null ? 0 : ghostAnchorX
+        );
+        const cursorY = Math.max(0, Number(buf.cursorY) || 0);
+
+        const screen = term.element && term.element.querySelector
+          ? term.element.querySelector('.xterm-screen')
+          : null;
+        const hostRect = terminalHost.getBoundingClientRect();
+        const screenRect = screen ? screen.getBoundingClientRect() : null;
+        const originLeft = screenRect ? (screenRect.left - hostRect.left) : 4;
+        const originTop = screenRect ? (screenRect.top - hostRect.top) : 4;
+
+        const left = originLeft + cursorX * dims.width;
+        const top = originTop + cursorY * dims.height;
         const visibleLength = Math.max(1, ghostSuffix.length);
         const available = Math.max(0, terminalHost.clientWidth - left - 18);
         if (available < Math.min(18, visibleLength * dims.width)) {
@@ -295,6 +317,16 @@
         ghost.style.left = left + 'px';
         ghost.style.top = top + 'px';
         ghost.style.maxWidth = available + 'px';
+      }
+
+      function scheduleGhostPosition() {
+        if (!ghostSuffix || !inputModelKnown) return;
+        requestAnimationFrame(function () {
+          if (!ghostSuffix || !inputModelKnown) return;
+          requestAnimationFrame(function () {
+            positionGhost();
+          });
+        });
       }
 
       function normalizeGhostCandidate(candidate) {
@@ -347,7 +379,7 @@
               ghostSuffix = value.slice(inputModel.length);
               renderGhostSuffix(ghostSuffix);
               ghost.classList.add('visible');
-              positionGhost();
+              scheduleGhostPosition();
             }
           );
         } catch (e) {
@@ -371,11 +403,21 @@
         /* Printable insertion is only unambiguous at the local cursor. */
         if (/^[\x20-\x7e]+$/.test(value)) {
           inputModel += value;
+          const currentX = Math.max(
+            0,
+            Number(term.buffer && term.buffer.active && term.buffer.active.cursorX) || 0
+          );
+          ghostAnchorX = Math.max(
+            currentX + value.length,
+            ghostAnchorX == null ? 0 : ghostAnchorX
+          );
           requestGhostPrediction();
+          scheduleGhostPosition();
           return;
         }
 
         if (value === '\x7f' || value === '\b') {
+          ghostAnchorX = null;
           if (inputModel.length) {
             inputModel = inputModel.slice(0, -1);
             requestGhostPrediction();
@@ -402,12 +444,14 @@
         if (value.indexOf('\x03') >= 0 || value.indexOf('\x04') >= 0) {
           inputModel = '';
           inputModelKnown = value.indexOf('\x04') < 0;
+          ghostAnchorX = null;
           hideGhost();
           return;
         }
 
         if (value.indexOf('\x17') >= 0 || value.indexOf('\x01') >= 0 || value.indexOf('\x05') >= 0 || value.indexOf('\x02') >= 0 || value.indexOf('\x06') >= 0) {
           inputModelKnown = false;
+          ghostAnchorX = null;
           hideGhost();
           return;
         }
@@ -415,6 +459,7 @@
         if (value.indexOf('\x15') >= 0) {
           inputModel = '';
           inputModelKnown = true;
+          ghostAnchorX = null;
           hideGhost();
           requestGhostPrediction();
           return;
@@ -422,6 +467,7 @@
 
         if (value.indexOf('\x1b') >= 0 || value.indexOf('\t') >= 0) {
           inputModelKnown = false;
+          ghostAnchorX = null;
           hideGhost();
           return;
         }
@@ -436,6 +482,7 @@
         }
 
         inputModelKnown = false;
+        ghostAnchorX = null;
         hideGhost();
       }
 
@@ -563,7 +610,17 @@
       }
 
       try { term.onWriteParsed(function(){ syncScrollBar(); }); } catch (e) {}
-      try { term.onRender(function(){ syncScrollBar(); }); } catch (e) {}
+      try {
+        term.onRender(function(){
+          syncScrollBar();
+          if (ghostSuffix && inputModelKnown) {
+            const buf = term.buffer && term.buffer.active;
+            const cursorX = Math.max(0, Number(buf && buf.cursorX) || 0);
+            if (ghostAnchorX != null && cursorX >= ghostAnchorX) ghostAnchorX = null;
+            positionGhost();
+          }
+        });
+      } catch (e) {}
       try { term.onScroll(function(){ syncScrollBar(); }); } catch (e) {}
 
       window.addEventListener('resize', scheduleFit);
