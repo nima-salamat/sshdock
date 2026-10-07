@@ -182,6 +182,10 @@ class TerminalSession(QObject):
                 parts.append(setup)
             parts.append(install_command(shell_name=shell_name, manage_echo=False))
             parts.append("printf '\\033[2J\\033[H'")
+            # Each component may already end with a shell command separator.
+            # Normalize only the boundary so we never generate an empty command
+            # between two separators in the final PTY payload.
+            parts = [part.strip().rstrip(";") for part in parts if part.strip()]
             payload = "; ".join(parts) + "\r"
 
             await asyncio.wait_for(

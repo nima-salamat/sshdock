@@ -398,6 +398,41 @@ def test_terminal_prompt_matches_literal_root_prompt_shape():
     assert "033[1;33m" in session
 
 
+
+def test_terminal_bootstrap_payload_is_syntactically_valid():
+    import ast
+    import subprocess
+
+    from app.terminal.docker_pretty import install_command
+
+    session = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
+    tree = ast.parse(session)
+    start_line = session[:session.index('        if shell_name == "bash":')].count("\n") + 1
+    end_line = session[:session.index('        elif shell_name == "zsh":')].count("\n") + 1
+    setup_node = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "setup" for target in node.targets)
+        and start_line <= node.lineno < end_line
+    )
+    setup = ast.literal_eval(setup_node.value)
+
+    parts = [setup, install_command(shell_name="bash", manage_echo=False), "printf '\\033[2J\\033[H'"]
+    parts = [part.strip().rstrip(";") for part in parts if part.strip()]
+    payload = "; ".join(parts)
+
+    syntax = subprocess.run(
+        ["bash", "-n"],
+        input=payload,
+        text=True,
+        capture_output=True,
+        timeout=3,
+        check=False,
+    )
+    assert syntax.returncode == 0, syntax.stderr
+    assert "; ;" not in payload
+
 def test_bash_prompt_setup_is_syntactically_valid():
     import ast
     import subprocess
