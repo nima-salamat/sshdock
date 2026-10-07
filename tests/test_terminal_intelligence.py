@@ -66,7 +66,8 @@ def test_terminal_html_allows_ghost_acceptance_with_tab_or_arrow_right():
 def test_terminal_session_restores_pty_echo_after_integration():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     assert 'self.channel.write(b"stty -echo 2>/dev/null\\r")' in src
-    assert 'b"stty echo 2>/dev/null; printf \'\\r\\033[K\'\\r"' in src
+    assert 'stty echo 2>/dev/null' in src
+    assert "\\033[2J\\033[H" in src
 
 
 def test_terminal_html_disables_ghost_completion_for_alternate_screen():
