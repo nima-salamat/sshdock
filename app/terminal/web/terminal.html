@@ -22,31 +22,69 @@
       box-sizing: border-box;
     }
     .xterm { height: 100%; }
-    /* Keep xterm's real scroll container visible and easy to hit. */
+    /*
+     * The scrollbar is a real SSHDock gutter outside xterm's content area.
+     * xterm remains the sole source of truth for scroll position.
+     */
+    #terminal {
+      padding-right: 18px;
+    }
+    .xterm { height: 100%; width: 100%; }
     .xterm .xterm-viewport {
       overflow-y: scroll !important;
-      scrollbar-width: thin;
-      scrollbar-color: rgba(139, 154, 173, 0.78) rgba(12, 18, 25, 0.55);
-      -ms-overflow-style: auto;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
     }
     .xterm .xterm-viewport::-webkit-scrollbar {
-      width: 11px;
-      height: 11px;
+      width: 0;
+      height: 0;
     }
-    .xterm .xterm-viewport::-webkit-scrollbar-track {
+
+    #sshdock-scroll-gutter {
+      position: absolute;
+      top: 4px;
+      right: 3px;
+      bottom: 4px;
+      width: 12px;
+      z-index: 1000;
+      user-select: none;
+      pointer-events: auto;
+      touch-action: none;
+      display: flex;
+      justify-content: center;
+      border-radius: 6px;
+      background: rgba(80, 94, 112, 0.18);
+      opacity: 0.92;
+    }
+    #sshdock-scroll-gutter[hidden] { display: none; }
+
+    #sshdock-scroll-track {
+      position: absolute;
+      inset: 0;
+      border-radius: 6px;
       background: rgba(12, 18, 25, 0.55);
+      cursor: pointer;
+    }
+
+    #sshdock-scroll-thumb {
+      position: absolute;
+      left: 1px;
+      top: 0;
+      width: 10px;
+      min-height: 30px;
       border-radius: 5px;
+      background: rgba(139, 154, 173, 0.82);
+      cursor: grab;
+      box-sizing: border-box;
+      border: 1px solid rgba(12, 18, 25, 0.28);
+      transform: translateY(0);
     }
-    .xterm .xterm-viewport::-webkit-scrollbar-thumb {
-      background: rgba(139, 154, 173, 0.78);
-      border-radius: 5px;
-      border: 2px solid rgba(12, 18, 25, 0.55);
+    #sshdock-scroll-thumb:hover {
+      background: rgba(168, 183, 201, 0.94);
     }
-    .xterm .xterm-viewport::-webkit-scrollbar-thumb:hover {
-      background: rgba(168, 183, 201, 0.92);
-    }
-    .xterm .xterm-viewport::-webkit-scrollbar-corner {
-      background: #0c1219;
+    #sshdock-scroll-thumb.dragging {
+      cursor: grabbing;
+      background: rgba(185, 201, 220, 0.98);
     }
 
     /*
@@ -178,6 +216,10 @@
 <body>
   <div id="term-root">
     <div id="terminal"><div id="sshdock-ghost" aria-hidden="true"></div></div>
+    <div id="sshdock-scroll-gutter" hidden aria-label="Terminal scroll bar">
+      <div id="sshdock-scroll-track"></div>
+      <div id="sshdock-scroll-thumb"></div>
+    </div>
   </div>
 
 <script src="vendor/xterm.js"></script>
@@ -412,8 +454,164 @@
         ghost.classList.toggle('light', !!(theme && theme.background && String(theme.background).toLowerCase() !== '#080d13'));
       }
 
-      // xterm owns scrolling directly. Keeping its viewport scrollbar visible
-      // avoids a second synthetic scrollbar drifting out of sync with the buffer.
+      /*
+       * xterm owns the actual scrollback. This gutter is only a visible,
+       * pointer-capturable projection of xterm's scroll position.
+       */
+      try {
+        if (term._core && term._core.viewport) term._core.viewport.scrollBarWidth = 0;
+      } catch (e) {}
+
+      const scrollGutter = document.getElementById('sshdock-scroll-gutter');
+      const scrollTrack = document.getElementById('sshdock-scroll-track');
+      const scrollThumb = document.getElementById('sshdock-scroll-thumb');
+      let scrollDrag = null;
+
+      function activeScrollState() {
+        const active = term.buffer && term.buffer.active;
+        const alternate = !!active && active.type === 'alternate';
+        const normal = term.buffer && term.buffer.normal;
+        const rows = Math.max(1, term.rows || 1);
+        const maxLine = alternate ? 0 : Math.max(0, Number(normal ? normal.baseY : 0));
+        const line = alternate ? 0 : Math.max(
+          0,
+          Math.min(maxLine, Number(active ? active.viewportY : 0))
+        );
+        return { active, alternate, rows, maxLine, line };
+      }
+
+      function syncScrollBar() {
+        if (!scrollGutter || !scrollTrack || !scrollThumb) return;
+        const trackH = scrollTrack.clientHeight;
+        const state = activeScrollState();
+
+        if (trackH <= 0 || state.alternate || state.maxLine <= 0) {
+          scrollGutter.hidden = true;
+          scrollDrag = null;
+          scrollThumb.classList.remove('dragging');
+          return;
+        }
+
+        scrollGutter.hidden = false;
+        const logicalLines = state.maxLine + state.rows;
+        const thumbH = Math.max(
+          30,
+          Math.min(trackH, Math.round(trackH * state.rows / logicalLines))
+        );
+        const travel = Math.max(0, trackH - thumbH);
+        const top = state.maxLine > 0
+          ? Math.round((state.line / state.maxLine) * travel)
+          : 0;
+        scrollThumb.style.height = thumbH + 'px';
+        scrollThumb.style.transform = 'translateY(' + top + 'px)';
+      }
+
+      function scrollToLine(line) {
+        const state = activeScrollState();
+        if (state.alternate || state.maxLine <= 0) return;
+        const target = Math.max(0, Math.min(state.maxLine, Math.round(line)));
+        try {
+          term.scrollToLine(target);
+        } catch (e) {
+          try {
+            const vp = document.querySelector('#terminal .xterm-viewport');
+            if (vp) {
+              vp.scrollTop = (target / state.maxLine) *
+                Math.max(0, vp.scrollHeight - vp.clientHeight);
+            }
+          } catch (ignored) {}
+        }
+        syncScrollBar();
+      }
+
+      function trackPointerToLine(clientY) {
+        if (!scrollTrack) return;
+        const state = activeScrollState();
+        if (state.alternate || state.maxLine <= 0) return;
+        const rect = scrollTrack.getBoundingClientRect();
+        const usable = Math.max(1, rect.height - scrollThumb.getBoundingClientRect().height);
+        const thumbTop = Math.max(
+          0,
+          Math.min(usable, clientY - rect.top - scrollThumb.getBoundingClientRect().height / 2)
+        );
+        scrollToLine((thumbTop / usable) * state.maxLine);
+      }
+
+      if (scrollGutter && scrollTrack && scrollThumb) {
+        scrollThumb.addEventListener('pointerdown', function (ev) {
+          const state = activeScrollState();
+          if (state.alternate || state.maxLine <= 0) return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          const gutterRect = scrollTrack.getBoundingClientRect();
+          const thumbRect = scrollThumb.getBoundingClientRect();
+          scrollDrag = {
+            pointerId: ev.pointerId,
+            startY: ev.clientY,
+            startTop: thumbRect.top - gutterRect.top,
+            maxTop: Math.max(1, gutterRect.height - thumbRect.height),
+            maxLine: state.maxLine,
+          };
+          try { scrollThumb.setPointerCapture(ev.pointerId); } catch (e) {}
+          scrollThumb.classList.add('dragging');
+        });
+
+        scrollThumb.addEventListener('pointermove', function (ev) {
+          if (!scrollDrag || ev.pointerId !== scrollDrag.pointerId) return;
+          ev.preventDefault();
+          const delta = ev.clientY - scrollDrag.startY;
+          const top = Math.max(
+            0,
+            Math.min(scrollDrag.maxTop, scrollDrag.startTop + delta)
+          );
+          scrollToLine((top / scrollDrag.maxTop) * scrollDrag.maxLine);
+        });
+
+        function endScrollDrag(ev) {
+          if (!scrollDrag) return;
+          if (ev && scrollDrag.pointerId !== ev.pointerId) return;
+          scrollDrag = null;
+          scrollThumb.classList.remove('dragging');
+        }
+        scrollThumb.addEventListener('pointerup', endScrollDrag);
+        scrollThumb.addEventListener('pointercancel', endScrollDrag);
+        scrollThumb.addEventListener('lostpointercapture', endScrollDrag);
+
+        scrollTrack.addEventListener('pointerdown', function (ev) {
+          if (ev.target === scrollThumb) return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          trackPointerToLine(ev.clientY);
+        });
+
+        scrollGutter.addEventListener('wheel', function (ev) {
+          const state = activeScrollState();
+          if (state.alternate || state.maxLine <= 0) return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          let cellH = 16;
+          try {
+            cellH = term._core._renderService.dimensions.css.cell.height || 16;
+          } catch (e) {}
+          const lines = Math.max(1, Math.round(ev.deltaY / Math.max(1, cellH)));
+          scrollToLine(state.line + lines);
+        }, { passive: false });
+
+        window.addEventListener('resize', syncScrollBar);
+        if (window.ResizeObserver) {
+          try {
+            new ResizeObserver(syncScrollBar).observe(
+              document.getElementById('term-root') || document.getElementById('terminal')
+            );
+          } catch (e) {}
+        }
+        try { term.onWriteParsed(syncScrollBar); } catch (e) {}
+        try { term.onRender(syncScrollBar); } catch (e) {}
+        try { term.onScroll(syncScrollBar); } catch (e) {}
+        setTimeout(syncScrollBar, 0);
+        requestAnimationFrame(syncScrollBar);
+      }
+
       let bridge = null;
       function reportCwdFromOsc(data) {
         try {
@@ -727,9 +925,10 @@
                 b.style.top=top+'px';
                 b.style.height=height+'px';
                 b.style.left='0px';
-                // The xterm host itself ends before the dedicated scrollbar gutter.
-                // The table therefore uses the full host width without overlapping it.
-                b.style.width='auto';
+                // Keep HTML result blocks inside the same content width as xterm,
+                // leaving the right-side scrollbar gutter completely free.
+                b.style.width='calc(100% - 18px)';
+                b.style.right='18px';
                 // Only visible while its reserved lines intersect the viewport
                 b.style.display = (top+height>0 && top<viewH) ? 'flex' : 'none';
               }
