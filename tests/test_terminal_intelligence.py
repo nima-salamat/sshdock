@@ -29,6 +29,8 @@ def test_terminal_native_scrollbar_contract():
     assert "self._scrollbar.valueChanged.connect(self._scrollbar_value_changed)" in src
     assert "def _on_scroll_changed" in src
     assert "bridge.report_scroll(maxLine, viewportLine, rows)" in html
+    assert "term.onWriteParsed(function(){ reportScrollState(); })" in html
+    assert "term.onScroll(function(){ reportScrollState(); })" in html
     assert "scrollToLine: function (line)" in html
     assert "padding-right: 18px" in html
     assert "sshdock-scroll-gutter" not in html
