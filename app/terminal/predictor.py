@@ -21,6 +21,20 @@ _SECRET_PATTERNS = (
     re.compile(r"(?i)\bdocker\s+login\b.*(?:\s-p\s+|\s--password(?:-stdin)?\s+)\S+"),
     re.compile(r"(?i)-----BEGIN (?:OPENSSH|RSA|EC|DSA|PRIVATE) KEY-----"),
 )
+_NO_SPACE_PATH_COMMAND = re.compile(
+    r"^(?P<command>cd|pushd|popd)(?P<target>/.*|~(?:/.*)?|\\.\\.?/.*)$"
+)
+
+
+def normalize_prediction(command: str) -> str:
+    """Normalize shell-directory predictions without changing real transport."""
+    value = str(command or "")
+    match = _NO_SPACE_PATH_COMMAND.match(value)
+    if match is None:
+        return value
+    return f"{match.group('command')} {match.group('target')}"
+
+
 _ASSIGNMENT_SECRET = re.compile(
     r"(?i)\b(?:password|passwd|token|api[_-]?key|secret|access[_-]?key|private[_-]?key)\s*="
 )
@@ -163,9 +177,10 @@ class CommandPredictor:
         raw_cf = raw.casefold()
 
         for command, count in counts.items():
-            if not command.casefold().startswith(raw_cf):
+            candidate = normalize_prediction(command)
+            if not candidate.casefold().startswith(raw_cf):
                 continue
-            if len(command) <= len(raw):
+            if len(candidate) <= len(raw):
                 continue
 
             score = 10.0
@@ -181,9 +196,9 @@ class CommandPredictor:
 
             if current_parts:
                 try:
-                    candidate_parts = shlex.split(command)
+                    candidate_parts = shlex.split(candidate)
                 except ValueError:
-                    candidate_parts = command.split()
+                    candidate_parts = candidate.split()
                 if candidate_parts and candidate_parts[: len(current_parts)] == list(current_parts):
                     score += 3.0
 
@@ -200,14 +215,21 @@ class CommandPredictor:
             ):
                 score += 1.0
 
-            candidates.append((score, command))
+            candidates.append((score, candidate))
 
         candidates.sort(key=lambda item: (-item[0], item[1].casefold(), item[1]))
-        selected = [
-            command
-            for score, command in candidates
-            if score >= min_score
-        ][: max(1, int(limit))]
+        selected: list[str] = []
+        seen: set[str] = set()
+        for score, candidate in candidates:
+            if score < min_score:
+                continue
+            key = candidate.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            selected.append(candidate)
+            if len(selected) >= max(1, int(limit)):
+                break
 
         if limit == 1:
             return selected[0] if selected else None

@@ -3245,14 +3245,28 @@ class MainWindow(QMainWindow):
             from app.terminal.docker_pretty import KIND_TO_CMD
             cmd = KIND_TO_CMD.get(kind, "")
 
-            # Result is rendered by Qt (HTML table decoration inside xterm), not ANSI text
+            # Prefer the rich HTML overlay in xterm.js. The original ANSI table
+            # renderer remains the fallback for the pyte terminal path.
             if term is None:
                 self.statusBar().showMessage("mdocker: no terminal widget", 4000)
                 return
-            if not hasattr(term, "show_table"):
-                self.statusBar().showMessage("mdocker: terminal has no show_table", 4000)
+            if hasattr(term, "show_table"):
+                term.show_table(title, display_cols, table_rows, command=cmd)
+            elif hasattr(term, "feed"):
+                from app.terminal.ansi_table import format_ansi_table
+                screen = getattr(term, "_screen", None)
+                term_cols = max(40, int(getattr(screen, "columns", 120) or 120))
+                term.feed(
+                    format_ansi_table(
+                        title,
+                        display_cols,
+                        table_rows,
+                        term_cols=term_cols,
+                    ).encode("utf-8")
+                )
+            else:
+                self.statusBar().showMessage("mdocker: terminal cannot render tables", 4000)
                 return
-            term.show_table(title, display_cols, table_rows, command=cmd)
 
             self.statusBar().showMessage(f"{title}: {len(table_rows)} row(s)", 2000)
         except Exception as exc:

@@ -251,6 +251,7 @@
       function hideGhost() {
         ghostCandidate = '';
         ghostSuffix = '';
+        ghost.dataset.leadingWhitespace = '0';
         ghost.classList.remove('visible');
         ghost.textContent = '';
       }
@@ -277,10 +278,12 @@
 
         const cursorX = Math.max(0, buf.cursorX || 0);
         const cursorY = Math.max(0, buf.cursorY || 0);
-        const left = 4 + cursorX * dims.width;
+        const leadingWhitespace = Number(ghost.dataset.leadingWhitespace) || 0;
+        const left = 4 + cursorX * dims.width + leadingWhitespace * dims.width;
         const top = 4 + cursorY * dims.height;
+        const visibleLength = Math.max(1, ghostSuffix.length - leadingWhitespace);
         const available = Math.max(0, terminalHost.clientWidth - left - 18);
-        if (available < Math.min(18, ghostSuffix.length * dims.width)) {
+        if (available < Math.min(18, visibleLength * dims.width)) {
           hideGhost();
           return;
         }
@@ -310,11 +313,13 @@
               }
               ghostCandidate = value;
               ghostSuffix = value.slice(inputModel.length);
-              // HTML collapses ordinary leading spaces in some rendering paths.
-              // Keep the semantic suffix untouched for acceptance, but render
-              // spaces as non-breaking cells so "cd /path" never looks like
-              // "cd/path" in the ghost preview.
+              // Keep leading whitespace as layout geometry rather than relying
+              // on HTML text rendering, so "cd /path" is visibly spaced everywhere.
+              const leading = (ghostSuffix.match(/^[ \t]+/) || [''])[0];
+              const leadingWhitespace = leading.replace(/\t/g, '    ').length;
+              ghost.dataset.leadingWhitespace = String(leadingWhitespace);
               ghost.textContent = ghostSuffix
+                .slice(leading.length)
                 .replace(/ /g, '\u00a0')
                 .replace(/\t/g, '\u00a0\u00a0\u00a0\u00a0');
               ghost.classList.add('visible');
@@ -553,7 +558,7 @@
           ev.preventDefault();
           ev.stopPropagation();
           try {
-            if (bridge && bridge.send_input) bridge.send_input(ghostSuffix);
+            sendInput(ghostSuffix);
             inputModel += ghostSuffix;
             hideGhost();
           } catch (e) {

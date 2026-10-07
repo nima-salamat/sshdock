@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from app.terminal.predictor import CommandPredictor
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -40,8 +42,17 @@ def test_terminal_native_scrollbar_contract():
 
 def test_terminal_html_preserves_whitespace_in_ghost_display():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    assert "ghost.dataset.leadingWhitespace" in src
+    assert "ghostSuffix.slice(leading.length)" in src
     assert "replace(/ /g, '\\u00a0')" in src
     assert "ghostSuffix = value.slice(inputModel.length)" in src
+
+
+def test_predictor_repairs_missing_shell_separator_for_cd_path_predictions():
+    predictor = CommandPredictor()
+    predictor.ingest(["cd/opt/django", "pwd"], server_id="server")
+    assert predictor.suggest("cd", server_id="server") == "cd /opt/django"
+    assert predictor.suggest("cd /", server_id="server") == "cd /opt/django"
 
 
 def test_terminal_html_preserves_ansi_colors():
@@ -70,6 +81,9 @@ def test_terminal_session_preserves_color_capable_shell_environment():
     assert "CLICOLOR=1" in session
     assert "dircolors -b" in session
     assert "ls --color=auto" in session
+    assert "grep --color=auto" in session
+    assert "PS1='\\[\\033[01;32m" in session
+    assert "PROMPT='%F{green}" in session
     assert "set -gx TERM xterm-256color" in session
     assert '"TERM": "xterm-256color"' in client
     assert '"COLORTERM": "truecolor"' in client
@@ -78,6 +92,7 @@ def test_terminal_session_preserves_color_capable_shell_environment():
 def test_terminal_html_allows_ghost_acceptance_with_tab_or_arrow_right():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
     assert "(ev.key === 'Tab' || ev.key === 'ArrowRight')" in src
+    assert "sendInput(ghostSuffix)" in src
     assert "ghostSuffix && inputModelKnown" in src
 
 

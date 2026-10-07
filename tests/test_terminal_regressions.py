@@ -126,6 +126,14 @@ def test_terminal_has_dedicated_scrollbar_gutter():
     assert "bar.setVisible(int(max_line) > 0)" in widget
 
 
+def test_magic_table_uses_original_ansi_renderer_on_pyte_fallback():
+    window = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
+    ansi = (ROOT / "app/terminal/ansi_table.py").read_text(encoding="utf-8")
+    assert "from app.terminal.ansi_table import format_ansi_table" in window
+    assert "format_ansi_table(" in window
+    assert "_GREEN" in ansi
+
+
 def test_magic_table_has_prompt_fallback_and_scrollbar_sync_without_tables():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
     assert "const startAbs = Math.max(0, promptAbs - RESERVE);" in src
