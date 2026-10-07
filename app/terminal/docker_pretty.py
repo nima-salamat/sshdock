@@ -175,13 +175,13 @@ def source_command(shell_name: str = "") -> str:
     return f". {SH_SCRIPT_PATH} 2>/dev/null"
 
 
-def install_command(*, manage_echo: bool = True) -> str:
+def install_command(*, shell_name: str = "", manage_echo: bool = True) -> str:
     """Return the shell command used to install the mdocker integration.
 
     When the caller already disabled PTY echo, ``manage_echo=False`` prevents
     the long base64 payload from being echoed by the remote shell.
     """
-    command = prepare_command() + " && " + source_command()
+    command = prepare_command() + " && " + source_command(shell_name)
     if manage_echo:
         return "stty -echo 2>/dev/null; " + command + "; stty echo 2>/dev/null; printf '\\r\\033[K'"
     return command

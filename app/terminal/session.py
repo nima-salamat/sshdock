@@ -174,7 +174,7 @@ class TerminalSession(QObject):
             parts = []
             if setup:
                 parts.append(setup)
-            parts.append(install_command(manage_echo=False))
+            parts.append(install_command(shell_name=shell_name, manage_echo=False))
             parts.append("printf '\\033[2J\\033[H'")
             payload = "; ".join(parts) + "\r"
 

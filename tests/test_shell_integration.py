@@ -23,7 +23,7 @@ def test_shell_integration_prepares_scripts_outside_the_live_terminal():
     docker = (ROOT / "app/terminal/docker_pretty.py").read_text(encoding="utf-8")
     assert "await self._prepare_shell_integration()" in src
     assert "await self.ssh.run(prepare_command(), timeout=5.0)" in src
-    assert "install_command(manage_echo=False)" in src
+    assert "install_command(shell_name=shell_name, manage_echo=False)" in src
     assert "def prepare_command()" in docker
     assert "def source_command(shell_name: str = \"\")" in docker
 

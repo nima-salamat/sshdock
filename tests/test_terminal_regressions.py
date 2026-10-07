@@ -75,7 +75,7 @@ def test_virtual_tables_follow_xterm_alternate_screen():
 def test_terminal_bootstrap_disables_echo_before_payload():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     assert 'self.channel.write(b"stty -echo 2>/dev/null\\r")' in src
-    assert "install_command(manage_echo=False)" in src
+    assert "install_command(shell_name=shell_name, manage_echo=False)" in src
     assert "stty echo 2>/dev/null" in src
     assert "033[K" in src
 
@@ -369,3 +369,12 @@ def test_terminal_ghost_invalidates_after_non_append_cursor_edits():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
     assert "ArrowLeft" in src
     assert "Delete" in src
+
+
+def test_mdocker_install_command_is_shell_aware():
+    from app.terminal.docker_pretty import install_command
+
+    bash = install_command(shell_name="bash", manage_echo=False)
+    fish = install_command(shell_name="fish", manage_echo=False)
+    assert '. $HOME/.cache/sshdock/docker.sh' in bash
+    assert 'source $HOME/.cache/sshdock/docker.fish' in fish
