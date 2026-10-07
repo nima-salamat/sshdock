@@ -5,8 +5,8 @@ from __future__ import annotations
 import base64
 
 TABLE_RESERVE_LINES = 20
-SH_SCRIPT_PATH = "/tmp/.sshdock_docker.sh"
-FISH_SCRIPT_PATH = "/tmp/.sshdock_docker.fish"
+SH_SCRIPT_PATH = "$HOME/.cache/sshdock/docker.sh"
+FISH_SCRIPT_PATH = "$HOME/.cache/sshdock/docker.fish"
 
 DOCKER_PRETTY_SH = r"""# sshdock mdocker — table-capable docker list commands
 # After command: 20 blank lines, then prompt. App draws the HTML table on those lines.
@@ -138,9 +138,18 @@ def _write_script_command(path: str, content: str) -> str:
 
 
 def prepare_command() -> str:
-    """Prepare both POSIX and fish integrations outside the interactive PTY."""
-    return _write_script_command(SH_SCRIPT_PATH, DOCKER_PRETTY_SH) + " && " + _write_script_command(
-        FISH_SCRIPT_PATH, DOCKER_PRETTY_FISH
+    """Prepare both integrations in a private per-user directory."""
+    prefix = 'umask 077 && mkdir -p "$HOME/.cache/sshdock" && chmod 700 "$HOME/.cache/sshdock"'
+    write_sh = _write_script_command(SH_SCRIPT_PATH, DOCKER_PRETTY_SH)
+    write_fish = _write_script_command(FISH_SCRIPT_PATH, DOCKER_PRETTY_FISH)
+    return " && ".join(
+        (
+            prefix,
+            write_sh,
+            'chmod 600 "$HOME/.cache/sshdock/docker.sh"',
+            write_fish,
+            'chmod 600 "$HOME/.cache/sshdock/docker.fish"',
+        )
     )
 
 
