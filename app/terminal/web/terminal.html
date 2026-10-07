@@ -257,7 +257,6 @@
       function hideGhost() {
         ghostCandidate = '';
         ghostSuffix = '';
-        ghost.dataset.leadingWhitespace = '0';
         ghost.classList.remove('visible');
         ghost.textContent = '';
       }
@@ -284,10 +283,9 @@
 
         const cursorX = Math.max(0, buf.cursorX || 0);
         const cursorY = Math.max(0, buf.cursorY || 0);
-        const leadingWhitespace = Number(ghost.dataset.leadingWhitespace) || 0;
-        const left = 4 + cursorX * dims.width + leadingWhitespace * dims.width;
+        const left = 4 + cursorX * dims.width;
         const top = 4 + cursorY * dims.height;
-        const visibleLength = Math.max(1, ghostSuffix.length - leadingWhitespace);
+        const visibleLength = Math.max(1, ghostSuffix.length);
         const available = Math.max(0, terminalHost.clientWidth - left - 18);
         if (available < Math.min(18, visibleLength * dims.width)) {
           hideGhost();
@@ -296,6 +294,13 @@
         ghost.style.left = left + 'px';
         ghost.style.top = top + 'px';
         ghost.style.maxWidth = available + 'px';
+      }
+
+      function normalizeGhostCandidate(candidate) {
+        const value = String(candidate || '');
+        const match = value.match(/^(cd|pushd|popd)(?=\/|~(?:\/)?|\.\/?|\.\.\/)(.*)$/);
+        if (!match) return value;
+        return match[1] + ' ' + match[2];
       }
 
       function requestGhostPrediction() {
@@ -312,20 +317,15 @@
             completionContext.serverId || '',
             function (candidate) {
               if (seq !== ghostRequestSeq) return;
-              const value = String(candidate || '');
+              const value = normalizeGhostCandidate(candidate);
               if (!value || !value.toLowerCase().startsWith(inputModel.toLowerCase()) || value.length <= inputModel.length) {
                 hideGhost();
                 return;
               }
               ghostCandidate = value;
               ghostSuffix = value.slice(inputModel.length);
-              // Keep leading whitespace as layout geometry rather than relying
-              // on HTML text rendering, so "cd /path" is visibly spaced everywhere.
-              const leading = (ghostSuffix.match(/^[ \t]+/) || [''])[0];
-              const leadingWhitespace = leading.replace(/\t/g, '    ').length;
-              ghost.dataset.leadingWhitespace = String(leadingWhitespace);
+              // Preserve every leading separator as visible terminal text.
               ghost.textContent = ghostSuffix
-                .slice(leading.length)
                 .replace(/ /g, '\u00a0')
                 .replace(/\t/g, '\u00a0\u00a0\u00a0\u00a0');
               ghost.classList.add('visible');
@@ -336,7 +336,6 @@
           hideGhost();
         }
       }
-
       function setInputModel(value, known) {
         inputModel = value || '';
         inputModelKnown = known !== false;
@@ -574,6 +573,10 @@
           return false;
         }
         if (ev.type === 'keydown' && ev.key === 'Escape') {
+          hideGhost();
+        }
+        if (ev.type === 'keydown' && (ev.key === 'ArrowLeft' || ev.key === 'Delete')) {
+          inputModelKnown = false;
           hideGhost();
         }
         if (ev.type === 'keydown' && (ev.key === 'ArrowUp' || ev.key === 'ArrowDown' || ev.key === 'Home' || ev.key === 'End')) {

@@ -15,12 +15,10 @@ def test_terminal_starts_the_real_user_shell_before_integration():
 def test_terminal_integration_preserves_native_docker_command():
     src = (ROOT / "app/terminal/docker_pretty.py").read_text(encoding="utf-8")
     assert "mdocker() {" in src
-    assert "# Intentionally do not shadow the real docker command." in src
-    assert "m-docker() {" not in src
-    assert "magic-docker() {" not in src
-    assert "docker() {" not in src.replace("mdocker() {", "")
-
-
+    assert "docker() {" in src
+    assert "command docker" in src
+    assert "m-docker='mdocker'" in src
+    assert "magic-docker='mdocker'" in src
 def test_terminal_explorer_restores_button_factory():
     src = (ROOT / "app/files/terminal_explorer.py").read_text(encoding="utf-8")
     assert "QFileDialog, QApplication," in src
@@ -84,6 +82,7 @@ def test_terminal_bootstrap_disables_echo_before_payload():
 def test_terminal_magic_supports_native_docker_magic_form_for_posix_shells():
     docker = (ROOT / "app/terminal/docker_pretty.py").read_text(encoding="utf-8")
     assert "docker() {" in docker
+    assert "--magic|--mdocker)" in docker
     assert '"$arg" = "--magic"' in docker
     assert '"$arg" = "--mdocker"' in docker
     assert "command docker \"$@\"" in docker
@@ -352,3 +351,25 @@ def test_terminal_input_is_not_lost_during_webchannel_or_session_startup():
     assert "term.setEnabled(False)" in window
     assert "term.setEnabled(True)" in window
     assert "if not self._ready or not self._pending_writes:" in widget
+
+
+def test_terminal_prompt_colours_common_bash_root_prompt():
+    session = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
+    assert 'case "${PS1:-}" in' in session
+    assert "\\u@\\h:\\w\\$" in session
+    assert "debian_chroot" in session
+    assert "033[01;32m" in session
+    assert "033[01;34m" in session
+
+def test_terminal_predictor_repairs_relative_directory_predictions():
+    from app.terminal.predictor import CommandPredictor
+
+    predictor = CommandPredictor()
+    predictor.ingest(["cd./project", "cd../shared", "pushd~/work"], server_id="server")
+    assert predictor.suggest("cd", server_id="server") in {"cd ./project", "cd ../shared"}
+    assert predictor.suggest("pushd", server_id="server") == "pushd ~/work"
+
+def test_terminal_ghost_invalidates_after_non_append_cursor_edits():
+    src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    assert "ArrowLeft" in src
+    assert "Delete" in src

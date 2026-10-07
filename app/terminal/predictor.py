@@ -22,7 +22,7 @@ _SECRET_PATTERNS = (
     re.compile(r"(?i)-----BEGIN (?:OPENSSH|RSA|EC|DSA|PRIVATE) KEY-----"),
 )
 _NO_SPACE_PATH_COMMAND = re.compile(
-    r"^(?P<command>cd|pushd|popd)(?P<target>/.*|~(?:/.*)?|\\.\\.?/.*)$"
+    r"^(?P<command>cd|pushd|popd)(?P<target>/.*|~(?:/.*)?|\.\.?/.*)$"
 )
 
 
