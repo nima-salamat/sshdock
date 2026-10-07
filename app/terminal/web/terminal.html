@@ -22,46 +22,31 @@
       box-sizing: border-box;
     }
     .xterm { height: 100%; }
+    /* Keep xterm's real scroll container visible and easy to hit. */
     .xterm .xterm-viewport {
       overflow-y: scroll !important;
-      scrollbar-width: none;
-      -ms-overflow-style: none;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(139, 154, 173, 0.78) rgba(12, 18, 25, 0.55);
+      -ms-overflow-style: auto;
     }
     .xterm .xterm-viewport::-webkit-scrollbar {
-      width: 0;
-      height: 0;
-    }
-
-    /* Dedicated terminal scroll gutter. xterm's canvas never occupies this area. */
-    #sshdock-scrollbar {
-      position: absolute;
-      top: 4px;
-      right: 2px;
-      bottom: 4px;
       width: 11px;
-      border-radius: 6px;
-      background: rgba(80, 94, 112, 0.18);
-      z-index: 80;
-      user-select: none;
-      touch-action: none;
+      height: 11px;
     }
-    #sshdock-scrollbar[hidden] { display: none; }
-    #sshdock-scrollbar-thumb {
-      position: absolute;
-      top: 0;
-      left: 1px;
-      width: 9px;
-      min-height: 28px;
+    .xterm .xterm-viewport::-webkit-scrollbar-track {
+      background: rgba(12, 18, 25, 0.55);
       border-radius: 5px;
-      background: rgba(139, 154, 173, 0.62);
-      cursor: grab;
     }
-    #sshdock-scrollbar-thumb:hover {
-      background: rgba(168, 183, 201, 0.8);
+    .xterm .xterm-viewport::-webkit-scrollbar-thumb {
+      background: rgba(139, 154, 173, 0.78);
+      border-radius: 5px;
+      border: 2px solid rgba(12, 18, 25, 0.55);
     }
-    #sshdock-scrollbar-thumb.dragging {
-      cursor: grabbing;
-      background: rgba(185, 201, 220, 0.9);
+    .xterm .xterm-viewport::-webkit-scrollbar-thumb:hover {
+      background: rgba(168, 183, 201, 0.92);
+    }
+    .xterm .xterm-viewport::-webkit-scrollbar-corner {
+      background: #0c1219;
     }
 
     /*
@@ -193,9 +178,6 @@
 <body>
   <div id="term-root">
     <div id="terminal"><div id="sshdock-ghost" aria-hidden="true"></div></div>
-    <div id="sshdock-scrollbar" hidden aria-label="Terminal scroll bar">
-      <div id="sshdock-scrollbar-thumb"></div>
-    </div>
   </div>
 
 <script src="vendor/xterm.js"></script>
@@ -430,158 +412,8 @@
         ghost.classList.toggle('light', !!(theme && theme.background && String(theme.background).toLowerCase() !== '#080d13'));
       }
 
-      // The native xterm scrollbar is hidden because SSHDock renders it in a
-      // dedicated gutter. Tell FitAddon not to reserve the hidden scrollbar a
-      // second time, otherwise a terminal resize loses an extra ~15px.
-      try {
-        if (term._core && term._core.viewport) term._core.viewport.scrollBarWidth = 0;
-      } catch (e) {}
-
-      /*
-       * Keep the terminal scrollbar in a real, dedicated gutter outside the
-       * xterm canvas. The xterm viewport remains the actual scroll container;
-       * we only hide its native scrollbar and mirror its position here.
-       */
-      const scrollRail = document.getElementById('sshdock-scrollbar');
-      const scrollThumb = document.getElementById('sshdock-scrollbar-thumb');
-      let scrollViewport = null;
-      let scrollDrag = null;
-
-      function getScrollViewport() {
-        if (scrollViewport && scrollViewport.isConnected) return scrollViewport;
-        scrollViewport = document.querySelector('#terminal .xterm-viewport');
-        return scrollViewport;
-      }
-
-      function activeScrollState() {
-        const active = term.buffer && term.buffer.active;
-        const alternate = !!active && active.type === 'alternate';
-        const normal = term.buffer && term.buffer.normal;
-        const rows = Math.max(1, term.rows || 1);
-        const maxLine = alternate ? 0 : Math.max(0, normal ? normal.baseY : (active ? active.baseY : 0));
-        const line = alternate ? 0 : Math.max(0, Math.min(maxLine, active ? active.viewportY : 0));
-        return { active, alternate, rows, maxLine, line };
-      }
-
-      function syncScrollBar() {
-        if (!scrollRail || !scrollThumb) return;
-        const trackH = scrollRail.clientHeight;
-        if (trackH <= 0) return;
-        const state = activeScrollState();
-
-        if (state.alternate || state.maxLine <= 0) {
-          // Keep the gutter structurally present, but hide the thumb while there
-          // is no scrollback. The terminal itself never loses this right-side
-          // hit target and no text can flow underneath it.
-          scrollRail.hidden = true;
-          return;
-        }
-
-        scrollRail.hidden = false;
-        const logicalLines = state.maxLine + state.rows;
-        const thumbH = Math.max(28, Math.min(trackH, Math.round(trackH * state.rows / logicalLines)));
-        const travel = Math.max(0, trackH - thumbH);
-        const top = state.maxLine > 0 ? Math.round((state.line / state.maxLine) * travel) : 0;
-        scrollThumb.style.height = thumbH + 'px';
-        scrollThumb.style.transform = 'translateY(' + top + 'px)';
-      }
-
-      function scrollToRatio(ratio) {
-        const state = activeScrollState();
-        if (state.alternate || state.maxLine <= 0) return;
-        const target = Math.round(Math.max(0, Math.min(1, ratio)) * state.maxLine);
-        try {
-          term.scrollToLine(target);
-        } catch (e) {
-          const vp = getScrollViewport();
-          if (vp) vp.scrollTop = (target / state.maxLine) * Math.max(0, vp.scrollHeight - vp.clientHeight);
-        }
-        syncScrollBar();
-      }
-
-      function beginScrollDrag(ev) {
-        const state = activeScrollState();
-        if (!scrollRail || !scrollThumb || state.alternate || state.maxLine <= 0) return;
-        ev.preventDefault();
-        ev.stopPropagation();
-        const railRect = scrollRail.getBoundingClientRect();
-        const thumbRect = scrollThumb.getBoundingClientRect();
-        scrollDrag = {
-          startY: ev.clientY,
-          startTop: thumbRect.top - railRect.top,
-          maxTop: Math.max(1, railRect.height - thumbRect.height),
-          maxLine: state.maxLine,
-        };
-        scrollThumb.classList.add('dragging');
-      }
-
-      function moveScrollDrag(ev) {
-        if (!scrollDrag) return;
-        ev.preventDefault();
-        const delta = ev.clientY - scrollDrag.startY;
-        const top = Math.max(0, Math.min(scrollDrag.maxTop, scrollDrag.startTop + delta));
-        const ratio = top / scrollDrag.maxTop;
-        try {
-          term.scrollToLine(Math.round(ratio * scrollDrag.maxLine));
-        } catch (e) {}
-        syncScrollBar();
-      }
-
-      function endScrollDrag() {
-        if (!scrollDrag) return;
-        scrollDrag = null;
-        scrollThumb.classList.remove('dragging');
-      }
-
-      if (scrollRail && scrollThumb) {
-        scrollThumb.addEventListener('mousedown', beginScrollDrag);
-        document.addEventListener('mousemove', moveScrollDrag);
-        document.addEventListener('mouseup', endScrollDrag);
-        scrollRail.addEventListener('mousedown', function (ev) {
-          if (ev.target === scrollThumb) return;
-          const rect = scrollRail.getBoundingClientRect();
-          scrollToRatio((ev.clientY - rect.top) / Math.max(1, rect.height));
-        });
-        scrollRail.addEventListener('wheel', function (ev) {
-          const state = activeScrollState();
-          if (state.alternate || state.maxLine <= 0) return;
-          ev.preventDefault();
-          ev.stopPropagation();
-          const ch = Math.max(1, (() => {
-            try {
-              return term._core._renderService.dimensions.css.cell.height || 16;
-            } catch (e) {
-              return 16;
-            }
-          })());
-          const lines = Math.max(1, Math.round(ev.deltaY / ch));
-          const target = Math.max(0, Math.min(state.maxLine, state.line + lines));
-          try { term.scrollToLine(target); } catch (e) {}
-          syncScrollBar();
-        }, {passive: false});
-      }
-
-      // Keep the scrollbar synchronized with normal terminal output even when
-      // no magic table has ever been rendered. xterm documents onWriteParsed
-      // as the buffer-change event, while onRender covers repaint-driven
-      // viewport updates.
-      if (!term._sshdockScrollBarHook) {
-        term._sshdockScrollBarHook = true;
-        try { term.onWriteParsed(function(){ syncScrollBar(); }); } catch (e) {}
-        try { term.onRender(function(){ syncScrollBar(); }); } catch (e) {}
-        try { term.onScroll(function(){ syncScrollBar(); }); } catch (e) {}
-        window.addEventListener('resize', function(){ syncScrollBar(); });
-        if (window.ResizeObserver) {
-          try {
-            new ResizeObserver(function(){ syncScrollBar(); }).observe(
-              document.getElementById('term-root') || document.getElementById('terminal')
-            );
-          } catch (e) {}
-        }
-        setTimeout(syncScrollBar, 0);
-        requestAnimationFrame(syncScrollBar);
-      }
-
+      // xterm owns scrolling directly. Keeping its viewport scrollbar visible
+      // avoids a second synthetic scrollbar drifting out of sync with the buffer.
       let bridge = null;
       function reportCwdFromOsc(data) {
         try {
