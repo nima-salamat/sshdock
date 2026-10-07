@@ -35,7 +35,7 @@ def test_terminal_html_keeps_xterm_scrollbar_visible():
 
 def test_terminal_html_preserves_whitespace_in_ghost_display():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
-    assert "replace(/ /g, '\\\\u00a0')" in src
+    assert "replace(/ /g, '\\u00a0')" in src
     assert "ghostSuffix = value.slice(inputModel.length)" in src
 
 
