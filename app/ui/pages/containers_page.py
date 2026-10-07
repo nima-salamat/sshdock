@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -20,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.docker.models import ContainerInfo
+from app.ui.widgets.helpers import AutoRefreshControl
 from app.ui.widgets.table import ColumnSpec, StandardTableWidget
 
 
@@ -57,7 +57,7 @@ class ContainersPage(QWidget):
         self._remove_one = remove_one
         self._rows: list[dict[str, Any]] = []
         self._syncing_selection = False
-        self.auto_refresh = None
+        self.auto_refresh = AutoRefreshControl(5, self)
         self._build(make_columns_resizable)
 
     def _build(self, make_columns_resizable: Callable | None) -> None:
@@ -70,12 +70,9 @@ class ContainersPage(QWidget):
         title.setObjectName("heroTitle")
         header.addWidget(title)
         header.addStretch()
-        from app.ui.widgets.table import TableToolbar
-        self.table_toolbar = TableToolbar("Containers", auto_refresh_seconds=5, parent=self)
-        self.auto_refresh = self.table_toolbar.auto_refresh
-        self.table_toolbar.refreshRequested.connect(self.refresh_requested.emit)
         header.addWidget(self.auto_refresh)
-        refresh = self.table_toolbar.refresh_button
+        refresh = QPushButton("Refresh")
+        refresh.clicked.connect(self.refresh_requested.emit)
         header.addWidget(refresh)
         new = QPushButton("New container")
         new.setProperty("accent", True)
