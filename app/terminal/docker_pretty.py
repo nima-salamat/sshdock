@@ -27,9 +27,16 @@ mdocker() {
 alias m-docker='mdocker'
 alias magic-docker='mdocker'
 
-# Intentionally do not shadow the real docker command.
-# The native docker executable/function remains untouched so existing
-# user aliases, functions, and wrappers continue to work.
+# Support the historical "docker … --magic" form as well as mdocker.
+# Keep this wrapper POSIX-compatible and delegate all non-magic calls to native docker.
+docker() {
+  for arg in "$@"; do
+    case "$arg" in
+      --magic|--mdocker) __sshdock_magic "$@"; return 0 ;;
+    esac
+  done
+  command docker "$@"
+}
 
 # Long aliases (md*)
 alias mdps='mdocker ps'
@@ -91,6 +98,15 @@ end
 
 alias m-docker='mdocker'
 alias magic-docker='mdocker'
+function docker
+  for arg in $argv
+    if test "$arg" = --magic -o "$arg" = --mdocker
+      __sshdock_magic $argv
+      return 0
+    end
+  end
+  command docker $argv
+end
 alias mdps='mdocker ps'
 alias mdpa='mdocker ps -a'
 alias mdimg='mdocker images'

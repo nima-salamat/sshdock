@@ -107,10 +107,16 @@
     .sshdock-tbl table {
       border-collapse: separate;
       border-spacing: 0;
-      width: max-content;
+      width: 100%;
       min-width: 100%;
-      table-layout: auto;
+      table-layout: fixed;
     }
+    .sshdock-tbl th,
+    .sshdock-tbl td { overflow: hidden; text-overflow: ellipsis; }
+    .sshdock-tbl td { cursor: default; user-select: text; }
+    .sshdock-copy-menu { position: fixed; z-index: 5000; min-width: 150px; padding: 4px; border: 1px solid #2a3440; border-radius: 5px; background: #111821; box-shadow: 0 8px 24px rgba(0,0,0,.34); font: 12px Cascadia Mono, Consolas, Menlo, monospace; }
+    .sshdock-copy-menu button { display:block; width:100%; border:0; border-radius:3px; padding:7px 10px; text-align:left; background:transparent; color:#e6edf3; cursor:pointer; }
+    .sshdock-copy-menu button:hover { background:#1a2633; }
     .sshdock-tbl thead th {
       position: sticky;
       top: 0;
@@ -123,7 +129,7 @@
       border-right: 1px solid #1a222c;
       white-space: nowrap;
       min-width: 48px;
-      cursor: col-resize;
+      cursor: default;
       user-select: none;
     }
     .sshdock-tbl thead th:hover {
@@ -663,21 +669,22 @@
             block._anchorMarker = anchorMarker;
 
             let html = '<div class="cap">' + esc(cmd ? ('$ '+cmd) : ('$ '+title)) +
-              ' · ' + esc(title) + ' · ' + rows.length + ' rows</div><div class="body"><table><thead><tr>';
-            cols.forEach(function(c) {
-              html += '<th'+(isIdCol(c)?' class="col-id"':'')+'>'+esc(c)+'</th>';
-            });
+              ' · ' + esc(title) + ' · ' + rows.length + ' rows</div><div class="body"><table><colgroup>';
+            const equalWidth = (100 / Math.max(1, cols.length)).toFixed(4) + '%';
+            cols.forEach(function() { html += '<col style="width:'+equalWidth+'">'; });
+            html += '</colgroup><thead><tr>';
+            cols.forEach(function(c) { html += '<th>'+esc(c)+'</th>'; });
             html += '</tr></thead><tbody>';
             const statusIdx = cols.findIndex(function(c){
               const s=String(c).toLowerCase(); return s==='status'||s==='state';
             });
-            rows.forEach(function(row){
-              html += '<tr>';
-              (row||[]).forEach(function(cell,i){
+            rows.forEach(function(row,rowIdx){
+              html += '<tr data-row="'+rowIdx+'">';
+              cols.forEach(function(_,i){
+                const cell = row && row[i] != null ? row[i] : '';
                 const val = cell==null?'':String(cell);
                 const cl = [];
                 if (i===statusIdx){ const s=statusClass(val); if(s) cl.push(s); }
-                if (isIdCol(cols[i])) cl.push('col-id');
                 html += '<td'+(cl.length?' class="'+cl.join(' ')+'"':'')+
                   ' title="'+esc(val)+'">'+esc(val)+'</td>';
               });
@@ -690,47 +697,97 @@
 
             // ID column full width + drag-resize headers (all columns)
             const table = block.querySelector('table');
+            function rowText(rowIdx) {
+              const tr = table && table.querySelector('tbody tr[data-row="'+rowIdx+'"]');
+              if (!tr) return '';
+              return Array.from(tr.children).map(function(td){ return td.textContent || ''; }).join('\t');
+            }
+            function closeCopyMenu() {
+              const menu = document.getElementById('sshdock-copy-menu');
+              if (menu && menu.parentNode) menu.parentNode.removeChild(menu);
+            }
+            function copyText(value) {
+              closeCopyMenu();
+              if (bridge && bridge.copy_text) {
+                try { bridge.copy_text(String(value || '')); return; } catch(e) {}
+              }
+              try {
+                const area = document.createElement('textarea');
+                area.value = String(value || '');
+                area.style.position = 'fixed'; area.style.opacity = '0';
+                document.body.appendChild(area); area.focus(); area.select();
+                document.execCommand('copy'); area.remove();
+              } catch(e) {}
+            }
+            function openCopyMenu(ev, rowIdx, colIdx) {
+              closeCopyMenu();
+              const td = table && table.querySelector('tbody td[data-row="'+rowIdx+'"][data-col="'+colIdx+'"]');
+              const menu = document.createElement('div');
+              menu.id = 'sshdock-copy-menu';
+              menu.className = 'sshdock-copy-menu';
+              const actions = [['Copy cell', td ? td.textContent || '' : ''], ['Copy row', rowText(rowIdx)]];
+              actions.forEach(function(item){
+                const btn = document.createElement('button');
+                btn.type = 'button'; btn.textContent = item[0];
+                btn.addEventListener('click', function(){ copyText(item[1]); });
+                menu.appendChild(btn);
+              });
+              document.body.appendChild(menu);
+              menu.style.left = Math.max(4, Math.min(ev.clientX, window.innerWidth - menu.offsetWidth - 6)) + 'px';
+              menu.style.top = Math.max(4, Math.min(ev.clientY, window.innerHeight - menu.offsetHeight - 6)) + 'px';
+              ev.preventDefault(); ev.stopPropagation();
+            }
+            table.querySelectorAll('tbody td').forEach(function(td){
+              td.addEventListener('contextmenu', function(ev){
+                openCopyMenu(ev, Number(td.dataset.row), Number(td.dataset.col));
+              });
+            });
+            document.addEventListener('mousedown', function(ev){
+              const menu = document.getElementById('sshdock-copy-menu');
+              if (menu && !menu.contains(ev.target)) closeCopyMenu();
+            });
+            document.addEventListener('keydown', function(ev){
+              if (ev.key === 'Escape') closeCopyMenu();
+            });
+
             if (table) {
               block.addEventListener('wheel', function(ev){
                 if (!ev.target.closest('.body')) {
                   ev.stopPropagation();
                 }
               }, {passive:true});
-              table.querySelectorAll('thead th').forEach(function(th, colIdx){
-                if (th.classList.contains('col-id')) {
-                  let maxLen = (th.textContent||'').length;
-                  table.querySelectorAll('tbody tr').forEach(function(tr){
-                    const td=tr.children[colIdx];
-                    if (td) maxLen=Math.max(maxLen,(td.textContent||'').length);
-                  });
-                  const w = Math.max(200, maxLen*8.5+28);
-                  th.style.width = th.style.minWidth = w+'px';
-                  table.querySelectorAll('tbody tr').forEach(function(tr){
-                    const td=tr.children[colIdx];
-                    if (td) td.style.width = td.style.minWidth = w+'px';
-                  });
-                }
-                // Drag to resize any column from the right edge of the header
+              const colsEls = Array.from(table.querySelectorAll('colgroup col'));
+              const headers = Array.from(table.querySelectorAll('thead th'));
+              headers.forEach(function(th, colIdx){
                 th.addEventListener('mousedown', function(ev){
-                  const rect=th.getBoundingClientRect();
-                  if (rect.right-ev.clientX>10) return; // only near right edge
+                  const rect = th.getBoundingClientRect();
+                  if (rect.right - ev.clientX > 10) return;
+                  const neighborIdx = colIdx < headers.length - 1 ? colIdx + 1 : colIdx - 1;
+                  if (neighborIdx < 0) return;
                   ev.preventDefault();
                   ev.stopPropagation();
-                  const x0=ev.clientX, w0=th.offsetWidth;
+                  const widths = headers.map(function(h){ return h.getBoundingClientRect().width; });
+                  const startX = ev.clientX;
+                  const startThis = widths[colIdx];
+                  const startNeighbor = widths[neighborIdx];
                   function move(e){
-                    const w=Math.max(48,w0+(e.clientX-x0));
-                    th.style.width=th.style.minWidth=w+'px';
-                    table.querySelectorAll('tbody tr').forEach(function(tr){
-                      const td=tr.children[colIdx];
-                      if(td) td.style.width=td.style.minWidth=w+'px';
-                    });
+                    const delta = e.clientX - startX;
+                    const min = 54;
+                    const nextThis = Math.max(min, startThis + delta);
+                    const nextNeighbor = Math.max(min, startNeighbor - delta);
+                    if ((nextThis + nextNeighbor) > (startThis + startNeighbor + 0.01)) return;
+                    widths[colIdx] = nextThis;
+                    widths[neighborIdx] = nextNeighbor;
+                    colsEls.forEach(function(col, i){ col.style.width = widths[i] + 'px'; });
                   }
                   function up(){
-                    document.removeEventListener('mousemove',move);
-                    document.removeEventListener('mouseup',up);
+                    document.removeEventListener('mousemove', move);
+                    document.removeEventListener('mouseup', up);
+                    document.body.style.userSelect = '';
                   }
-                  document.addEventListener('mousemove',move);
-                  document.addEventListener('mouseup',up);
+                  document.body.style.userSelect = 'none';
+                  document.addEventListener('mousemove', move);
+                  document.addEventListener('mouseup', up);
                 });
               });
               const bodyEl = block.querySelector('.body');

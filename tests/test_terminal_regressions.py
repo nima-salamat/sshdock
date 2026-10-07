@@ -81,6 +81,38 @@ def test_terminal_bootstrap_disables_echo_before_payload():
     assert "stty echo 2>/dev/null" in src
     assert "033[K" in src
 
+def test_terminal_magic_supports_native_docker_magic_form_for_posix_shells():
+    docker = (ROOT / "app/terminal/docker_pretty.py").read_text(encoding="utf-8")
+    assert "docker() {" in docker
+    assert '"$arg" = "--magic"' in docker
+    assert '"$arg" = "--mdocker"' in docker
+    assert "command docker \"$@\"" in docker
+
+
+def test_terminal_magic_supports_native_docker_magic_form_for_fish():
+    docker = (ROOT / "app/terminal/docker_pretty.py").read_text(encoding="utf-8")
+    assert "function docker" in docker
+    assert "= --magic" in docker
+    assert "= --mdocker" in docker
+    assert "command docker $argv" in docker
+
+
+def test_magic_table_supports_equal_columns_resize_and_copy_context():
+    src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    widget = (ROOT / "app/terminal/web_widget.py").read_text(encoding="utf-8")
+    assert "table-layout: fixed" in src
+    assert "const equalWidth" in src
+    assert "<colgroup>" in src
+    assert "getBoundingClientRect().width" in src
+    assert "data-col" in src
+    assert "contextmenu" in src
+    assert "Copy cell" in src
+    assert "Copy row" in src
+    assert "bridge.copy_text" in src
+    assert "def copy_text(self, text: str)" in widget
+    assert "copy_requested = Signal(str)" in widget
+
+
 def test_terminal_magic_has_python_and_browser_delivery_paths():
     session = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     widget = (ROOT / "app/terminal/web_widget.py").read_text(encoding="utf-8")

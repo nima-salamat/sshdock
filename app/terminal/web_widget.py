@@ -33,6 +33,7 @@ class _Bridge(QObject):
     cwd_changed = Signal(str)
     magic_command = Signal(str)
     command_submitted = Signal(str)
+    copy_requested = Signal(str)
     scroll_changed = Signal(int, int, int)
 
     def __init__(self):
@@ -78,6 +79,11 @@ class _Bridge(QObject):
         if payload:
             self.magic_command.emit(payload)
 
+    @Slot(str)
+    def copy_text(self, text: str) -> None:
+        if text:
+            self.copy_requested.emit(text)
+
     @Slot(int, int, int)
     def report_scroll(self, max_line: int, viewport_line: int, rows: int) -> None:
         self.scroll_changed.emit(
@@ -98,6 +104,7 @@ class XtermTerminalWidget(QWidget):
     resize_requested = Signal(int, int)
     cwd_changed = Signal(str)
     magic_command = Signal(str)
+    copy_requested = Signal(str)
 
     def __init__(self, parent=None, theme: str = "dark"):
         super().__init__(parent)
@@ -116,6 +123,7 @@ class XtermTerminalWidget(QWidget):
         self._bridge.cwd_changed.connect(self._on_cwd_changed)
         self._bridge.magic_command.connect(self._on_magic_command)
         self._bridge.command_submitted.connect(self._on_command_submitted)
+        self._bridge.copy_requested.connect(self._on_copy_requested)
         self._bridge.scroll_changed.connect(self._on_scroll_changed)
 
         layout = QVBoxLayout(self)
@@ -416,6 +424,13 @@ class XtermTerminalWidget(QWidget):
     def _on_magic_command(self, payload: str) -> None:
         if payload:
             self.magic_command.emit(payload)
+
+    def _on_copy_requested(self, text: str) -> None:
+        try:
+            from PySide6.QtWidgets import QApplication
+            QApplication.clipboard().setText(str(text))
+        except Exception:
+            pass
 
     def _on_input(self, data: str) -> None:
         self.input_bytes.emit(data.encode("utf-8", "surrogatepass"))
