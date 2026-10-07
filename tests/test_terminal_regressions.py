@@ -68,19 +68,13 @@ def test_virtual_tables_follow_xterm_alternate_screen():
     assert "term.buffer.onBufferChange" in src
 
 
+
 def test_terminal_bootstrap_disables_echo_before_payload():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
-    docker = (ROOT / "app/terminal/docker_pretty.py").read_text(encoding="utf-8")
-    assert 'stty -echo 2>/dev/null' in src
-    assert 'echo_disabled = True' in src
-    stty_pos = src.index('stty -echo 2>/dev/null')
-    setup_pos = src.index('self.channel.write((setup +')
-    payload_pos = src.index('install_command(manage_echo=not echo_disabled)')
-    assert stty_pos < setup_pos < payload_pos
-    assert 'self.channel.write((setup + "\\r").encode("utf-8"))' in src
-    assert 'pretty = install_command(manage_echo=not echo_disabled) + "\\r"' in src
-    assert "manage_echo: bool = True" in docker
-    assert 'return command' in docker
+    assert 'self.channel.write(b"stty -echo 2>/dev/null\\r")' in src
+    assert "from app.terminal.docker_pretty import source_command" in src
+    assert "source_command(shell_name)" in src
+    assert 'self.channel.write(b"stty echo 2>/dev/null; printf \'\\r\\033[K\'\\r")' in src
 
 def test_terminal_magic_has_python_and_browser_delivery_paths():
     session = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
@@ -96,13 +90,15 @@ def test_terminal_magic_has_python_and_browser_delivery_paths():
     assert 'name="mdocker-xterm"' in window
 
 
-def test_mdocker_bootstrap_install_is_not_skipped_after_setup_failure():
-    src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
-    setup_pos = src.index('self.channel.write((setup + "\\r").encode("utf-8"))')
-    payload_pos = src.index("install_command(manage_echo=not echo_disabled)")
-    assert setup_pos < payload_pos
-    assert src[setup_pos:payload_pos].count("except Exception") >= 1
 
+def test_mdocker_bootstrap_is_prepared_outside_the_interactive_pty():
+    src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
+    docker = (ROOT / "app/terminal/docker_pretty.py").read_text(encoding="utf-8")
+    assert "await self._prepare_shell_integration()" in src
+    assert "async def _prepare_shell_integration(self) -> None:" in src
+    assert "prepare_command()" in src
+    assert "source_command(shell_name)" in src
+    assert 'SH_SCRIPT_PATH = "/tmp/.sshdock_docker.sh"' in docker
 
 def test_terminal_close_has_no_obsolete_bootstrap_cleanup_path():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
@@ -110,15 +106,16 @@ def test_terminal_close_has_no_obsolete_bootstrap_cleanup_path():
     assert "_bootstrap_path" not in src
 
 
+
 def test_terminal_has_dedicated_scrollbar_gutter():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    widget = (ROOT / "app/terminal/web_widget.py").read_text(encoding="utf-8")
     assert "padding: 4px 16px 4px 4px" in src
-    assert 'id="sshdock-scrollbar"' in src
-    assert "scrollbar-width: none" in src
-    assert "scrollToRatio" in src
-    assert "term._core.viewport.scrollBarWidth = 0" in src
-
-
+    assert "overflow-y: scroll !important" in src
+    assert ".xterm .xterm-viewport::-webkit-scrollbar" in src
+    assert "QScrollBar#terminalScrollBar" in widget
+    assert "self._scrollbar.hide()" in widget
+    assert "bar.setVisible(int(max_line) > 0)" in widget
 
 
 def test_magic_table_has_prompt_fallback_and_scrollbar_sync_without_tables():
@@ -128,22 +125,17 @@ def test_magic_table_has_prompt_fallback_and_scrollbar_sync_without_tables():
     assert "if (!term._sshdockScrollBarHook)" in src
     assert "term.onWriteParsed(function(){ syncScrollBar(); })" in src
     assert "term.onRender(function(){ syncScrollBar(); })" in src
-    assert "if (b._anchorMarker && markerLine < 0)" not in src
     assert "const anchor = markerLine >= 0" in src
-def test_virtual_table_uses_xterm_marker_for_resize_reflow():
-    src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
-    assert "term.registerMarker(0)" in src
-    assert "b._anchorMarker" in src
-    assert "block._anchorMarker.dispose()" in src
 
 
 def test_terminal_scrollbar_uses_xterm_buffer_position():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
-    assert "activeScrollState()" in src
-    assert "normal ? normal.baseY" in src
+    assert "function activeScrollState()" in src
+    assert "normal && normal.baseY" in src
+    assert "normal && normal.length" in src
     assert "term.scrollToLine" in src
-    assert "scrollThumb.style.transform" in src
-
+    assert "function syncScrollBar()" in src
+    assert "bridge.report_scroll(state.maxLine, state.viewportLine, state.rows)" in src
 
 def test_table_wheel_is_contained_without_breaking_native_scrollbars():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")

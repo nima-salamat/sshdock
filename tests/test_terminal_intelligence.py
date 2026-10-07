@@ -59,6 +59,10 @@ def test_terminal_session_preserves_color_capable_shell_environment():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     assert 'TERM=\"xterm-256color\"' in src
     assert 'COLORTERM=\"truecolor\"' in src
+    client = (ROOT / "app/ssh/client.py").read_text(encoding="utf-8")
+    assert '"TERM": "xterm-256color"' in client
+    assert '"COLORTERM": "truecolor"' in client
+    assert '"CLICOLOR": "1"' in client
     assert "dircolors -b" in src
     assert "alias ls >/dev/null 2>&1 || alias ls='ls --color=auto'" in src
     assert "set -gx TERM xterm-256color" in src
@@ -75,7 +79,8 @@ def test_terminal_session_restores_pty_echo_after_integration():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     assert 'self.channel.write(b"stty -echo 2>/dev/null\\r")' in src
     assert 'stty echo 2>/dev/null' in src
-    assert "\\033[2J\\033[H" in src
+    assert "printf '\\033[2J\\033[H'" in src
+    assert 'self.channel.write(b"stty echo 2>/dev/null; printf \'\\r\\033[K\'\\r")' in src
 
 
 def test_terminal_html_disables_ghost_completion_for_alternate_screen():

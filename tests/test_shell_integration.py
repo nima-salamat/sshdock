@@ -14,3 +14,22 @@ def test_shell_integration_preserves_existing_prompt_hooks():
     assert "add-zsh-hook precmd __sshdock_cwd" in block
     assert "__sshdock_cwd" in block
     assert "__sshdock_cwd(){ printf '\\\\033]7;file://sshdock%s\\\\007'" in block
+
+
+
+def test_shell_integration_prepares_scripts_outside_the_live_terminal():
+    src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
+    docker = (ROOT / "app/terminal/docker_pretty.py").read_text(encoding="utf-8")
+    assert "await self._prepare_shell_integration()" in src
+    assert "await self.ssh.run(prepare_command(), timeout=5.0)" in src
+    assert "source_command(shell_name)" in src
+    assert "def prepare_command()" in docker
+    assert "def source_command(shell_name: str = \"\")" in docker
+
+
+def test_fish_shell_has_a_native_mdocker_integration():
+    docker = (ROOT / "app/terminal/docker_pretty.py").read_text(encoding="utf-8")
+    assert "DOCKER_PRETTY_FISH" in docker
+    assert "function __sshdock_magic" in docker
+    assert "function mdocker" in docker
+    assert "source_command(shell_name)" in (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")

@@ -10,6 +10,7 @@ from app.ssh.client import (
     CommandResult,
     SSHServerConnection,
     _looks_like_encrypted_openssh_key,
+    _terminal_env,
 )
 
 
@@ -94,3 +95,19 @@ def test_non_openssh_key_and_missing_file_return_false(tmp_path: Path) -> None:
     plain.write_text("not a private key", encoding="utf-8")
     assert _looks_like_encrypted_openssh_key(str(plain)) is False
     assert _looks_like_encrypted_openssh_key(str(tmp_path / "missing")) is False
+
+
+
+def test_interactive_terminal_environment_enables_truecolor_from_shell_start() -> None:
+    env = _terminal_env(None)
+    assert env["TERM"] == "xterm-256color"
+    assert env["COLORTERM"] == "truecolor"
+    assert env["CLICOLOR"] == "1"
+
+
+def test_explicit_terminal_environment_can_override_defaults() -> None:
+    env = _terminal_env({"COLORTERM": "1", "CUSTOM": "value"})
+    assert env["TERM"] == "xterm-256color"
+    assert env["COLORTERM"] == "1"
+    assert env["CLICOLOR"] == "1"
+    assert env["CUSTOM"] == "value"
