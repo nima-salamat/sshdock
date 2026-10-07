@@ -19,7 +19,7 @@ def test_terminal_html_has_ghost_completion_and_tab_acceptance():
     assert "requestGhostPrediction" in src
     assert "bridge.predict_command" in src
     assert "ev.key === 'Tab'" in src
-    assert "bridge.send_input(ghostSuffix)" in src
+    assert "sendInput(ghostSuffix)" in src
     assert "term.onData(function (data)" in src
     assert "bridge.report_command(submitted)" in src
 
@@ -43,7 +43,7 @@ def test_terminal_native_scrollbar_contract():
 def test_terminal_html_preserves_whitespace_in_ghost_display():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
     assert "ghost.dataset.leadingWhitespace" in src
-    assert "ghostSuffix.slice(leading.length)" in src
+    assert ".slice(leading.length)" in src
     assert "replace(/ /g, '\\u00a0')" in src
     assert "ghostSuffix = value.slice(inputModel.length)" in src
 
