@@ -22,6 +22,16 @@ def test_terminal_html_has_ghost_completion_and_tab_acceptance():
     assert "bridge.report_command(submitted)" in src
 
 
+def test_terminal_html_keeps_xterm_scrollbar_visible():
+    src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    assert "scrollbar-width: thin" in src
+    assert "scrollbar-width: none" not in src
+    assert "::-webkit-scrollbar-thumb" in src
+    assert "width: 11px" in src
+    assert "scrollBarWidth = 0" not in src
+    assert "sshdock-scrollbar" not in src
+
+
 def test_terminal_html_disables_ghost_completion_for_alternate_screen():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
     assert "buf.type === 'alternate'" in src
