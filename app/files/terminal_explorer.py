@@ -45,6 +45,12 @@ AUDIO_EXTS = {
 def _queue_icon(name: str, is_dir: bool = False) -> QIcon:
     app = QApplication.instance()
     theme = str(app.property("sshdockTheme") if app is not None else "dark").lower()
+    if str(name).startswith("fa5s."):
+        try:
+            import qtawesome as qta
+            return qta.icon(str(name), color="#64748b" if theme == "light" else "#aebccc")
+        except Exception:
+            return QIcon()
     file_type = classify(name, is_dir=is_dir)
     try:
         import qtawesome as qta
@@ -89,11 +95,7 @@ class _QueueRowWidget(QWidget):
         app = QApplication.instance()
         theme = str(app.property("sshdockTheme") if app is not None else "dark").lower()
         remove_color = "#64748b" if theme == "light" else "#aebccc"
-        try:
-            import qtawesome as qta
-            remove_btn.setIcon(qta.icon("fa5s.times", color=remove_color))
-        except Exception:
-            pass
+        remove_btn.setIcon(_queue_icon("fa5s.times"))
         remove_btn.setIconSize(QSize(12, 12))
         remove_btn.clicked.connect(self.removed.emit)
         layout.addWidget(remove_btn)
