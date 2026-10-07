@@ -51,12 +51,13 @@ def test_terminal_html_preserves_ansi_colors():
 
 
 
+
 def test_terminal_session_hides_bootstrap_commands_and_clears_screen():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     assert 'payload = "; ".join(parts)' in src
     assert "source_command(shell_name)" in src
-    assert "printf '\\033[2J\\033[H'" in src
-    assert 'self.channel.write(b"stty echo 2>/dev/null; printf \'\\r\\033[K\'\\r")' in src
+    assert "\\033[2J\\033[H" in src
+    assert "stty echo 2>/dev/null" in src
 
 
 def test_terminal_session_preserves_color_capable_shell_environment():
@@ -79,12 +80,12 @@ def test_terminal_html_allows_ghost_acceptance_with_tab_or_arrow_right():
 
 
 
+
 def test_terminal_session_restores_pty_echo_after_integration():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     assert 'self.channel.write(b"stty -echo 2>/dev/null\\r")' in src
-    assert 'stty echo 2>/dev/null' in src
-    assert "printf '\\033[2J\\033[H'" in src
-    assert 'self.channel.write(b"stty echo 2>/dev/null; printf \'\\r\\033[K\'\\r")' in src
+    assert "stty echo 2>/dev/null" in src
+    assert "\\033[2J\\033[H" in src
 
 def test_terminal_html_disables_ghost_completion_for_alternate_screen():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")

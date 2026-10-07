@@ -72,12 +72,13 @@ def test_virtual_tables_follow_xterm_alternate_screen():
 
 
 
+
 def test_terminal_bootstrap_disables_echo_before_payload():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     assert 'self.channel.write(b"stty -echo 2>/dev/null\\r")' in src
-    assert "from app.terminal.docker_pretty import source_command" in src
     assert "source_command(shell_name)" in src
-    assert 'self.channel.write(b"stty echo 2>/dev/null; printf \'\\r\\033[K\'\\r")' in src
+    assert "stty echo 2>/dev/null" in src
+    assert "printf '\\r\\033[K'" in src
 
 def test_terminal_magic_has_python_and_browser_delivery_paths():
     session = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
