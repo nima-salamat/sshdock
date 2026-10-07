@@ -33,6 +33,20 @@ def test_terminal_html_keeps_xterm_scrollbar_visible():
     assert "padding-right: 18px" in src
 
 
+def test_terminal_html_preserves_whitespace_in_ghost_display():
+    src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    assert "replace(/ /g, '\\\\u00a0')" in src
+    assert "ghostSuffix = value.slice(inputModel.length)" in src
+
+
+def test_terminal_session_preserves_color_capable_shell_environment():
+    src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
+    assert 'TERM=\"xterm-256color\"' in src
+    assert 'COLORTERM=\"truecolor\"' in src
+    assert "dircolors -b" in src
+    assert "set -gx TERM xterm-256color" in src
+
+
 def test_terminal_html_allows_ghost_acceptance_with_tab_or_arrow_right():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
     assert "(ev.key === 'Tab' || ev.key === 'ArrowRight')" in src
