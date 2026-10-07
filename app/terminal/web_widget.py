@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal, Slot
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QScrollBar
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 HTML_PATH = WEB_DIR / "terminal.html"
@@ -33,6 +33,7 @@ class _Bridge(QObject):
     cwd_changed = Signal(str)
     magic_command = Signal(str)
     command_submitted = Signal(str)
+    scroll_changed = Signal(int, int, int)
 
     def __init__(self):
         super().__init__()
@@ -77,6 +78,14 @@ class _Bridge(QObject):
         if payload:
             self.magic_command.emit(payload)
 
+    @Slot(int, int, int)
+    def report_scroll(self, max_line: int, viewport_line: int, rows: int) -> None:
+        self.scroll_changed.emit(
+            max(0, int(max_line)),
+            max(0, int(viewport_line)),
+            max(1, int(rows)),
+        )
+
     @Slot()
     def js_ready(self) -> None:
         self.page_ready.emit()
@@ -107,6 +116,7 @@ class XtermTerminalWidget(QWidget):
         self._bridge.cwd_changed.connect(self._on_cwd_changed)
         self._bridge.magic_command.connect(self._on_magic_command)
         self._bridge.command_submitted.connect(self._on_command_submitted)
+        self._bridge.scroll_changed.connect(self._on_scroll_changed)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -133,6 +143,40 @@ class XtermTerminalWidget(QWidget):
         self._view = QWebEngineView(self)
         self._paint_chrome(self._bg)
 
+        self._scrollbar = QScrollBar(Qt.Orientation.Vertical, self)
+        self._scrollbar.setObjectName("terminalScrollBar")
+        self._scrollbar.setRange(0, 0)
+        self._scrollbar.setPageStep(1)
+        self._scrollbar.setSingleStep(1)
+        self._scrollbar.hide()
+        self._scrollbar.valueChanged.connect(self._scrollbar_value_changed)
+        self._scrollbar.setStyleSheet("""
+            QScrollBar#terminalScrollBar {
+                background: rgba(80, 94, 112, 0.18);
+                width: 12px;
+                border: 0;
+                border-radius: 6px;
+                margin: 3px 2px 3px 0;
+            }
+            QScrollBar#terminalScrollBar::handle:vertical {
+                background: rgba(139, 154, 173, 0.84);
+                min-height: 30px;
+                border-radius: 5px;
+                margin: 0;
+            }
+            QScrollBar#terminalScrollBar::handle:vertical:hover {
+                background: rgba(168, 183, 201, 0.94);
+            }
+            QScrollBar#terminalScrollBar::add-line:vertical,
+            QScrollBar#terminalScrollBar::sub-line:vertical,
+            QScrollBar#terminalScrollBar::add-page:vertical,
+            QScrollBar#terminalScrollBar::sub-page:vertical {
+                background: transparent;
+                border: 0;
+                height: 0;
+            }
+        """)
+
         settings = self._view.settings()
         settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
@@ -144,6 +188,7 @@ class XtermTerminalWidget(QWidget):
 
         layout.addWidget(self._view)
         self._view.hide()
+        self._position_scrollbar()
         self._view.load(QUrl.fromLocalFile(str(HTML_PATH)))
         self._view.loadFinished.connect(self._on_load_finished)
 
@@ -164,6 +209,41 @@ class XtermTerminalWidget(QWidget):
             self.setStyleSheet(f"background-color: {bg};")
         except Exception:
             pass
+
+
+    def _position_scrollbar(self) -> None:
+        """Place the native Qt scrollbar in the reserved right gutter."""
+        bar = getattr(self, "_scrollbar", None)
+        if bar is None:
+            return
+        width = 14
+        x = max(0, self.width() - width)
+        bar.setGeometry(x, 0, width, max(0, self.height()))
+        bar.raise_()
+
+    def _on_scroll_changed(self, max_line: int, viewport_line: int, rows: int) -> None:
+        bar = getattr(self, "_scrollbar", None)
+        if bar is None:
+            return
+        value = max(0, min(int(viewport_line), int(max_line)))
+        blocked = bar.blockSignals(True)
+        try:
+            bar.setRange(0, max(0, int(max_line)))
+            bar.setPageStep(max(1, int(rows)))
+            bar.setSingleStep(1)
+            bar.setValue(value)
+        finally:
+            bar.blockSignals(blocked)
+        bar.setVisible(int(max_line) > 0)
+        self._position_scrollbar()
+
+    def _scrollbar_value_changed(self, value: int) -> None:
+        if self._scrollbar.signalsBlocked():
+            return
+        self._run_js(
+            "window.sshdockTerm && window.sshdockTerm.scrollToLine && "
+            f"window.sshdockTerm.scrollToLine({int(value)});"
+        )
 
 
     def set_completion_provider(self, provider) -> None:
@@ -421,6 +501,7 @@ class XtermTerminalWidget(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self._position_scrollbar()
         QTimer.singleShot(50, lambda: self._run_js(
             "window.sshdockTerm && window.sshdockTerm.fit && window.sshdockTerm.fit();"
         ))
