@@ -22,19 +22,20 @@ def test_terminal_html_has_ghost_completion_and_tab_acceptance():
     assert "bridge.report_command(submitted)" in src
 
 
+
 def test_terminal_native_scrollbar_contract():
     src = (ROOT / "app/terminal/web_widget.py").read_text(encoding="utf-8")
     html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
     assert "QScrollBar" in src
     assert "self._scrollbar.valueChanged.connect(self._scrollbar_value_changed)" in src
     assert "def _on_scroll_changed" in src
-    assert "bridge.report_scroll(maxLine, viewportLine, rows)" in html
-    assert "term.onWriteParsed(function(){ reportScrollState(); })" in html
-    assert "term.onScroll(function(){ reportScrollState(); })" in html
+    assert "function activeScrollState()" in html
+    assert "function syncScrollBar()" in html
+    assert "term.onWriteParsed(function(){ syncScrollBar(); })" in html
+    assert "term.onScroll(function(){ syncScrollBar(); })" in html
     assert "scrollToLine: function (line)" in html
     assert "padding-right: 18px" in html
     assert "sshdock-scroll-gutter" not in html
-
 
 def test_terminal_html_preserves_whitespace_in_ghost_display():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
@@ -47,13 +48,13 @@ def test_terminal_html_preserves_ansi_colors():
     assert "minimumContrastRatio: 1" in src
 
 
+
 def test_terminal_session_hides_bootstrap_commands_and_clears_screen():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     assert 'payload = "; ".join(parts)' in src
-    assert 'parts.append("stty echo 2>/dev/null")' in src
-    assert 'parts.append("printf \'\\\\033[2J\\\\033[H\'")' in src
-    assert 'printf \'\\r\\033[K\'\\r"' not in src
-
+    assert "source_command(shell_name)" in src
+    assert 'parts.append("printf \'\\033[2J\\033[H\'")' in src
+    assert 'self.channel.write(b"stty echo 2>/dev/null; printf \'\\r\\033[K\'\\r")' in src
 
 def test_terminal_session_preserves_color_capable_shell_environment():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
