@@ -32,6 +32,26 @@ class _Bridge(QObject):
     find_requested = Signal()
     cwd_changed = Signal(str)
     magic_command = Signal(str)
+    command_submitted = Signal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.completion_provider = None
+
+    @Slot(str, str, str, str, result=str)
+    def predict_command(self, prefix: str, cwd: str, shell: str, server_id: str) -> str:
+        provider = self.completion_provider
+        if provider is None:
+            return ""
+        try:
+            return str(provider(prefix or "", cwd or "/", shell or "", server_id or "") or "")
+        except Exception:
+            return ""
+
+    @Slot(str)
+    def report_command(self, command: str) -> None:
+        if command:
+            self.command_submitted.emit(command)
 
     @Slot()
     def request_find(self) -> None:
@@ -86,6 +106,7 @@ class XtermTerminalWidget(QWidget):
         self._bridge.find_requested.connect(self._request_find)
         self._bridge.cwd_changed.connect(self._on_cwd_changed)
         self._bridge.magic_command.connect(self._on_magic_command)
+        self._bridge.command_submitted.connect(self._on_command_submitted)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -144,6 +165,35 @@ class XtermTerminalWidget(QWidget):
         except Exception:
             pass
 
+
+    def set_completion_provider(self, provider) -> None:
+        """Set the lightweight Python-side predictor used by xterm.js."""
+        self._bridge.completion_provider = provider
+
+    def set_completion_context(self, *, server_id: str = "", cwd: str = "/", shell: str = "") -> None:
+        import json
+        payload = json.dumps({
+            "serverId": str(server_id or ""),
+            "cwd": str(cwd or "/"),
+            "shell": str(shell or ""),
+        })
+        self._run_js(
+            "window.sshdockTerm&&window.sshdockTerm.setCompletionContext&&"
+            f"window.sshdockTerm.setCompletionContext({payload});"
+        )
+
+    def _on_command_submitted(self, command: str) -> None:
+        """Forward commands observed by xterm without coupling transport to prediction."""
+        try:
+            parent = self.parentWidget()
+            while parent is not None:
+                handler = getattr(parent, "_terminal_command_submitted", None)
+                if callable(handler):
+                    handler(command, self)
+                    return
+                parent = parent.parentWidget()
+        except Exception:
+            pass
 
     def set_font(self, font) -> None:
         """Apply font family/size to xterm.js (queued until page ready)."""
