@@ -77,4 +77,4 @@ __FISH__
 """
     snapshot = parse_history_output(output)
     assert snapshot.shell == "/bin/zsh"
-    assert snapshot.commands == ("git status", "docker compose ps", "ls -la")
+    assert snapshot.commands == ("docker compose ps",)

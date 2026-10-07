@@ -215,19 +215,23 @@ class CommandPredictor:
 
 
 def parse_history_output(output: str) -> HistorySnapshot:
-    """Parse bash/zsh/fish history formats from a bounded mixed stream."""
+    """Parse bash/zsh/fish history and keep only the detected shell's history."""
     commands: list[str] = []
     shell = ""
     source = ""
+    wanted_source = ""
 
     for raw in (output or "").splitlines():
-        line = raw.rstrip()
-        stripped = line.strip()
+        stripped = raw.strip()
         if not stripped:
             continue
+
         if stripped.startswith("__SSHDock_SHELL__"):
             shell = stripped.split("=", 1)[-1].strip()
+            shell_name = shell.rsplit("/", 1)[-1].lower()
+            wanted_source = shell_name if shell_name in {"bash", "zsh", "fish"} else ""
             continue
+
         if stripped == "__BASH__":
             source = "bash"
             continue
@@ -236,6 +240,9 @@ def parse_history_output(output: str) -> HistorySnapshot:
             continue
         if stripped == "__FISH__":
             source = "fish"
+            continue
+
+        if wanted_source and source != wanted_source:
             continue
 
         if source == "fish":
@@ -255,10 +262,12 @@ def parse_history_output(output: str) -> HistorySnapshot:
 
 
 
+
+
 async def load_remote_history(ssh) -> HistorySnapshot:
     """Read a bounded set of common shell history files once per session."""
     script = (
-        "printf '__SSHDock_SHELL__=__DOLLAR__{SHELL:-}__DOLLAR__\\n'; "
+        "printf '__SSHDock_SHELL__=%s\\n' \"$SHELL\"; "
         "printf '__BASH__\\n'; tail -n 500 ~/.bash_history 2>/dev/null; "
         "printf '__ZSH__\\n'; tail -n 500 ~/.zsh_history 2>/dev/null; "
         "printf '__FISH__\\n'; tail -n 500 ~/.local/share/fish/fish_history 2>/dev/null"
