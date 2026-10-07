@@ -112,6 +112,7 @@ class TerminalSession(QObject):
                 "add-zsh-hook -d precmd __sshdock_cwd 2>/dev/null; "
                 "add-zsh-hook precmd __sshdock_cwd; "
                 "__sshdock_cwd; "
+                "alias ls >/dev/null 2>&1 || alias ls='ls --color=auto' 2>/dev/null; "
                 "alias ll >/dev/null 2>&1 || alias ll='ls -alF --color=auto' 2>/dev/null; "
                 "alias la >/dev/null 2>&1 || alias la='ls -A --color=auto' 2>/dev/null; "
                 "printf '\\r\\033[K'\\r"
