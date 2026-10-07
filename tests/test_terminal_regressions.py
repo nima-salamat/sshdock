@@ -55,11 +55,14 @@ def test_terminal_webengine_fit_api_is_real_and_syncs_overlay():
     assert "window._sshdockSync()" in src
 
 
-def test_terminal_webengine_keeps_proven_first_commit_load_order():
+
+def test_terminal_webengine_waits_for_webchannel_ready_before_showing_view():
     src = (ROOT / "app/terminal/web_widget.py").read_text(encoding="utf-8")
     assert "self._view.show()" in src
-    assert "QTimer.singleShot(80, self._flush_pending)" in src
-
+    assert "def _on_page_ready(self)" in src
+    assert "if not self._ready or not self._pending_writes:" in src
+    assert "QTimer.singleShot(80, self._flush_pending)" not in src
+    assert "self._view.show()" in src[src.index("def _on_page_ready"):]
 
 def test_virtual_tables_follow_xterm_alternate_screen():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
@@ -290,3 +293,17 @@ def test_terminal_explorer_audio_video_file_types_use_dedicated_icons():
 def test_terminal_explorer_remove_action_uses_real_times_icon():
     src = (ROOT / "app/files/terminal_explorer.py").read_text(encoding="utf-8")
     assert 'qta.icon("fa5s.times", color=remove_color)' in src
+
+
+
+def test_terminal_input_is_not_lost_during_webchannel_or_session_startup():
+    html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    widget = (ROOT / "app/terminal/web_widget.py").read_text(encoding="utf-8")
+    window = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
+    assert "let pendingInput = '';" in html
+    assert "function sendInput(data)" in html
+    assert "pendingInput += value;" in html
+    assert "flushPendingInput();" in html
+    assert "term.setEnabled(False)" in window
+    assert "term.setEnabled(True)" in window
+    assert "if not self._ready or not self._pending_writes:" in widget

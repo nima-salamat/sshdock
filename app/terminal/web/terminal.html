@@ -435,6 +435,31 @@
       }
 
       let bridge = null;
+      let pendingInput = '';
+
+      function sendInput(data) {
+        const value = String(data || '');
+        if (!value) return;
+        if (bridge && bridge.send_input) {
+          try {
+            bridge.send_input(value);
+            return;
+          } catch (e) {}
+        }
+        pendingInput += value;
+      }
+
+      function flushPendingInput() {
+        if (!pendingInput || !bridge || !bridge.send_input) return;
+        const value = pendingInput;
+        pendingInput = '';
+        try {
+          bridge.send_input(value);
+        } catch (e) {
+          pendingInput = value;
+        }
+      }
+
       function reportCwdFromOsc(data) {
         try {
           let value = String(data || '');
@@ -515,7 +540,7 @@
 
       term.onData(function (data) {
         observeInput(data);
-        if (bridge && bridge.send_input) bridge.send_input(data);
+        sendInput(data);
       });
 
       // API for Python
@@ -868,6 +893,7 @@
           bridge = channel.objects.bridge;
           window.sshdockTerm.ready = true;
           scheduleFit();
+          flushPendingInput();
           if (bridge && bridge.js_ready) bridge.js_ready();
           reportScrollState();
           // Flush any cwd reported before the bridge was ready

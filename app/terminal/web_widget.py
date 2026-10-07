@@ -377,9 +377,10 @@ class XtermTerminalWidget(QWidget):
         # cannot flash its default white page on first paint.
         self._paint_chrome(self._bg)
         if ok:
-            self._view.show()
-            self._load_placeholder.hide()
-            QTimer.singleShot(80, self._flush_pending)
+            # QWebChannel may still be negotiating the bridge. Keep the page
+            # hidden until JS calls bridge.js_ready(), otherwise keystrokes can
+            # land in xterm before Python has an input path.
+            return
         else:
             self._load_placeholder.setText("Terminal engine failed to load")
 
@@ -432,13 +433,12 @@ class XtermTerminalWidget(QWidget):
         self._view.page().runJavaScript(script)
 
     def _flush_pending(self) -> None:
-        if not self._pending_writes:
+        if not self._ready or not self._pending_writes:
             return
         chunks = self._pending_writes
         self._pending_writes = []
         for chunk in chunks:
             self._write_js(chunk)
-        self._ready = True
 
     def _write_js(self, text: str) -> None:
         import json

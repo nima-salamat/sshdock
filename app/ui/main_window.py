@@ -3664,6 +3664,9 @@ class MainWindow(QMainWindow):
         page_layout.setSpacing(0)
         prefs = self.store.load_ui_prefs()
         term = create_terminal_widget(theme=str(prefs.get("theme") or "dark"))
+        # Do not accept keystrokes until a real SSH session is wired to the widget.
+        # This prevents connection-time keystrokes from being silently discarded.
+        term.setEnabled(False)
         if hasattr(term, "set_completion_provider"):
             term.set_completion_provider(self._predict_terminal_command)
             term.set_completion_context(server_id=server_id, cwd="/", shell="")
@@ -3699,6 +3702,7 @@ class MainWindow(QMainWindow):
             session.closed.connect(self._terminal_ui_closed)
             term.input_bytes.connect(lambda data, s=session: self._spawn(s.write(data)))
             term.resize_requested.connect(lambda cols, rows, s=session: self._spawn(s.resize(cols, rows)))
+            term.setEnabled(True)
             term.resize_requested.connect(
                 lambda cols, rows, sid=session.id: self._on_terminal_magic_resize(sid, cols)
             )
