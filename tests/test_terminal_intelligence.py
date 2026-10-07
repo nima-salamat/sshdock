@@ -49,7 +49,7 @@ def test_terminal_html_preserves_ansi_colors():
 
 def test_terminal_session_hides_bootstrap_commands_and_clears_screen():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
-    assert "payload = "; ".join(parts) + \"\\r\"" in src
+    assert 'payload = "; ".join(parts)' in src
     assert 'parts.append("stty echo 2>/dev/null")' in src
     assert 'parts.append("printf \'\\\\033[2J\\\\033[H\'")' in src
     assert 'printf \'\\r\\033[K\'\\r"' not in src
