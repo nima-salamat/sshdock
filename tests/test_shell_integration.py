@@ -10,6 +10,6 @@ def test_shell_integration_preserves_existing_prompt_hooks():
     block = src[start:end]
     assert "PS1=" not in block
     assert "PROMPT_COMMAND" in block
-    assert "precmd_functions" in block
+    assert "add-zsh-hook precmd __sshdock_cwd" in block
     assert "__sshdock_cwd" in block
     assert "printf '\\033]7;file://sshdock%s\\007'" in block
