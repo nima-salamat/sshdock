@@ -366,8 +366,8 @@
               // spaces as non-breaking cells so "cd /path" never looks like
               // "cd/path" in the ghost preview.
               ghost.textContent = ghostSuffix
-                .replace(/ /g, '\\u00a0')
-                .replace(/\\t/g, '\\u00a0\\u00a0\\u00a0\\u00a0');
+                .replace(/ /g, '\u00a0')
+                .replace(/\t/g, '\u00a0\u00a0\u00a0\u00a0');
               ghost.classList.add('visible');
               positionGhost();
             }
