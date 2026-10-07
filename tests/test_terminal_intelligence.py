@@ -22,15 +22,16 @@ def test_terminal_html_has_ghost_completion_and_tab_acceptance():
     assert "bridge.report_command(submitted)" in src
 
 
-def test_terminal_html_keeps_xterm_scrollbar_visible():
-    src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
-    assert 'id="sshdock-scroll-gutter"' in src
-    assert 'id="sshdock-scroll-thumb"' in src
-    assert "scrollbar-width: none" in src
-    assert "scrollBarWidth = 0" in src
-    assert "pointerdown" in src
-    assert "term.scrollToLine" in src
-    assert "padding-right: 18px" in src
+def test_terminal_native_scrollbar_contract():
+    src = (ROOT / "app/terminal/web_widget.py").read_text(encoding="utf-8")
+    html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    assert "QScrollBar" in src
+    assert "self._scrollbar.valueChanged.connect(self._scrollbar_value_changed)" in src
+    assert "def _on_scroll_changed" in src
+    assert "bridge.report_scroll(maxLine, viewportLine, rows)" in html
+    assert "scrollToLine: function (line)" in html
+    assert "padding-right: 18px" in html
+    assert "sshdock-scroll-gutter" not in html
 
 
 def test_terminal_html_preserves_whitespace_in_ghost_display():
