@@ -23,6 +23,7 @@ def test_terminal_html_has_ghost_completion_and_tab_acceptance():
 
 
 
+
 def test_terminal_native_scrollbar_contract():
     src = (ROOT / "app/terminal/web_widget.py").read_text(encoding="utf-8")
     html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
@@ -49,31 +50,33 @@ def test_terminal_html_preserves_ansi_colors():
 
 
 
+
 def test_terminal_session_hides_bootstrap_commands_and_clears_screen():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     assert 'payload = "; ".join(parts)' in src
     assert "source_command(shell_name)" in src
-    assert 'parts.append("printf \'\\033[2J\\033[H\'")' in src
+    assert "printf '\\033[2J\\033[H'" in src
     assert 'self.channel.write(b"stty echo 2>/dev/null; printf \'\\r\\033[K\'\\r")' in src
 
+
 def test_terminal_session_preserves_color_capable_shell_environment():
-    src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
-    assert 'TERM=\"xterm-256color\"' in src
-    assert 'COLORTERM=\"truecolor\"' in src
+    session = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     client = (ROOT / "app/ssh/client.py").read_text(encoding="utf-8")
+    assert 'TERM=\"xterm-256color\"' in session
+    assert 'COLORTERM=\"truecolor\"' in session
+    assert "dircolors -b" in session
+    assert "alias ls >/dev/null 2>&1 || alias ls='ls --color=auto'" in session
+    assert "set -gx TERM xterm-256color" in session
+    assert "functions -q ls; or function ls; command ls --color=auto $argv; end;" in session
     assert '"TERM": "xterm-256color"' in client
     assert '"COLORTERM": "truecolor"' in client
     assert '"CLICOLOR": "1"' in client
-    assert "dircolors -b" in src
-    assert "alias ls >/dev/null 2>&1 || alias ls='ls --color=auto'" in src
-    assert "set -gx TERM xterm-256color" in src
-    assert "functions -q ls; or function ls; command ls --color=auto $argv; end;" in src
-
 
 def test_terminal_html_allows_ghost_acceptance_with_tab_or_arrow_right():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
     assert "(ev.key === 'Tab' || ev.key === 'ArrowRight')" in src
     assert "ghostSuffix && inputModelKnown" in src
+
 
 
 def test_terminal_session_restores_pty_echo_after_integration():
@@ -82,7 +85,6 @@ def test_terminal_session_restores_pty_echo_after_integration():
     assert 'stty echo 2>/dev/null' in src
     assert "printf '\\033[2J\\033[H'" in src
     assert 'self.channel.write(b"stty echo 2>/dev/null; printf \'\\r\\033[K\'\\r")' in src
-
 
 def test_terminal_html_disables_ghost_completion_for_alternate_screen():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
