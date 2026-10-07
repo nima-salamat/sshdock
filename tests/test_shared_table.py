@@ -41,6 +41,7 @@ def test_containers_and_docker_results_use_shared_table_widget():
     containers = (ROOT / "app/ui/pages/containers_page.py").read_text(encoding="utf-8")
     docker = (ROOT / "app/ui/docker_results_table.py").read_text(encoding="utf-8")
     assert "StandardTableWidget" in containers
-    assert "install_standard_context_menu" in containers
+    assert "from app.ui.widgets.table import ColumnSpec, StandardTableWidget" in containers
+    assert "install_standard_context_menu" not in containers
     assert "StandardTableWidget" in docker
     assert "install_standard_context_menu" in docker
