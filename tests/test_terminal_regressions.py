@@ -380,3 +380,18 @@ def test_mdocker_install_command_is_shell_aware():
     fish = install_command(shell_name="fish", manage_echo=False)
     assert '. $HOME/.cache/sshdock/docker.sh' in bash
     assert 'source $HOME/.cache/sshdock/docker.fish' in fish
+
+
+def test_terminal_prompt_setup_has_no_unbalanced_bash_case():
+    session = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
+    block = session[session.index('        if shell_name == "bash":'):session.index('        elif shell_name == "zsh":')]
+    assert "__sshdock_apply_prompt(){" in block
+    assert ";; esac; };" in block
+    assert ";; esac; fi;" in block
+
+def test_terminal_prompt_matches_literal_root_prompt_shape():
+    session = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
+    assert "*'@'*:*'# '" in session
+    assert "033[1;32m" in session
+    assert "033[1;36m" in session
+    assert "033[1;33m" in session

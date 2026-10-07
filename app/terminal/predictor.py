@@ -100,9 +100,10 @@ class CommandPredictor:
         safe = sanitize_command(command)
         if safe is None:
             return False
+        canonical = normalize_prediction(safe)
 
         scope = self._scope(server_id)
-        obs = CommandObservation(safe, cwd or "/", shell or "")
+        obs = CommandObservation(canonical, cwd or "/", shell or "")
         history = self._history[scope]
         previous = history[-1].command if history else None
 
@@ -113,12 +114,12 @@ class CommandPredictor:
                 del self._counts[scope][old.command]
 
         history.append(obs)
-        self._counts[scope][safe] += 1
+        self._counts[scope][canonical] += 1
         self._clock += 1
-        self._last_seen[scope][safe] = self._clock
+        self._last_seen[scope][canonical] = self._clock
 
-        if previous and previous != safe:
-            self._transitions[scope][(previous, safe)] += 1
+        if previous and previous != canonical:
+            self._transitions[scope][(previous, canonical)] += 1
         return True
 
     def ingest(

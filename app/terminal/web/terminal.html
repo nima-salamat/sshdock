@@ -168,6 +168,7 @@
       max-width: calc(100% - 26px);
     }
     #sshdock-ghost.visible { opacity: 1; }
+    #sshdock-ghost .ghost-gap { display:inline-block; height:1em; vertical-align:top; }
     #sshdock-ghost.light { color: rgba(71, 85, 105, 0.48); }
 
   </style>
@@ -303,6 +304,26 @@
         return match[1] + ' ' + match[2];
       }
 
+      function renderGhostSuffix(suffix) {
+        ghost.textContent = '';
+        const text = String(suffix || '');
+        let index = 0;
+        let leadingCells = 0;
+        while (index < text.length) {
+          const ch = text.charAt(index);
+          if (ch === ' ') { index += 1; leadingCells += 1; continue; }
+          if (ch === '\t') { index += 1; leadingCells += 4; continue; }
+          break;
+        }
+        if (leadingCells > 0) {
+          const gap = document.createElement('span');
+          gap.className = 'ghost-gap';
+          gap.style.width = (leadingCells * cellMetrics().width) + 'px';
+          ghost.appendChild(gap);
+        }
+        if (index < text.length) ghost.appendChild(document.createTextNode(text.slice(index)));
+      }
+
       function requestGhostPrediction() {
         if (!inputModelKnown || !inputModel || !bridge || !bridge.predict_command) {
           hideGhost();
@@ -324,10 +345,7 @@
               }
               ghostCandidate = value;
               ghostSuffix = value.slice(inputModel.length);
-              // Preserve every leading separator as visible terminal text.
-              ghost.textContent = ghostSuffix
-                .replace(/ /g, '\u00a0')
-                .replace(/\t/g, '\u00a0\u00a0\u00a0\u00a0');
+              renderGhostSuffix(ghostSuffix);
               ghost.classList.add('visible');
               positionGhost();
             }
@@ -336,7 +354,7 @@
           hideGhost();
         }
       }
-      function setInputModel(value, known) {
+     function setInputModel(value, known) {
         inputModel = value || '';
         inputModelKnown = known !== false;
         if (!inputModelKnown) {

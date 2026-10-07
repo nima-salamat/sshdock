@@ -43,7 +43,8 @@ def test_terminal_native_scrollbar_contract():
 def test_terminal_html_preserves_whitespace_in_ghost_display():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
     assert "normalizeGhostCandidate" in src
-    assert "replace(/ /g, '\\u00a0')" in src
+    assert "renderGhostSuffix" in src
+    assert "ghost-gap" in src
     assert "ghostSuffix = value.slice(inputModel.length)" in src
 
 
