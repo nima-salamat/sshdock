@@ -102,7 +102,10 @@ def test_mdocker_bootstrap_is_prepared_outside_the_interactive_pty():
     assert "async def _prepare_shell_integration(self) -> None:" in src
     assert "prepare_command()" in src
     assert "source_command(shell_name)" in src
-    assert 'SH_SCRIPT_PATH = "/tmp/.sshdock_docker.sh"' in docker
+    assert 'SH_SCRIPT_PATH = "$HOME/.cache/sshdock/docker.sh"' in docker
+    assert 'umask 077' in docker
+    assert 'chmod 700 "$HOME/.cache/sshdock"' in docker
+    assert 'chmod 600 "$HOME/.cache/sshdock/docker.sh"' in docker
 
 def test_terminal_close_has_no_obsolete_bootstrap_cleanup_path():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
