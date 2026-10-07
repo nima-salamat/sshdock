@@ -75,24 +75,55 @@ class TerminalSession(QObject):
         if not self.channel or self.channel.closed:
             return
 
-        setup = (
-            "export TERM=xterm-256color COLORTERM=truecolor; "
-            "export CLICOLOR=1; "
-            "__sshdock_cwd(){ printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; }; "
-            "PROMPT_COMMAND=\"__sshdock_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}\"; "
-            "precmd_functions=(__sshdock_cwd); "
-            "PS1='\\[\\033[01;32m\\]\\u@\\h\\[\\033[00m\\]:\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\$ '; "
-            "alias ls='ls --color=auto' 2>/dev/null; "
-            "alias grep='grep --color=auto' 2>/dev/null; "
-            "alias fgrep='fgrep --color=auto' 2>/dev/null; "
-            "alias egrep='egrep --color=auto' 2>/dev/null; "
-            "alias ll='ls -alF --color=auto' 2>/dev/null; "
-            "alias la='ls -A --color=auto' 2>/dev/null; "
-            "command -v dircolors >/dev/null 2>&1 && eval \"$(dircolors -b 2>/dev/null)\"; "
-            "__sshdock_cwd; "
-            "stty echo 2>/dev/null; "
-            "printf '\\r\\033[K'\\r"
-        )
+
+        shell_name = ""
+        try:
+            shell_probe = await self.ssh.run_fast(
+                "printf '%s' \"$(basename \"$SHELL\")\"",
+                timeout=3.0,
+            )
+            shell_name = (getattr(shell_probe, "stdout", "") or "").strip().lower()
+        except Exception:
+            shell_name = ""
+
+        if shell_name == "bash":
+            setup = (
+                "export TERM=\"xterm-256color\" COLORTERM=\"truecolor\" CLICOLOR=1; "
+                "__sshdock_cwd(){ printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; }; "
+                "if declare -p PROMPT_COMMAND 2>/dev/null | grep -q 'declare -a'; then "
+                "case \";${PROMPT_COMMAND[*]};\" in *\";__sshdock_cwd;\"*) ;; *) "
+                "PROMPT_COMMAND=(\"__sshdock_cwd\" \"${PROMPT_COMMAND[@]}\");; esac; "
+                "else case \";${PROMPT_COMMAND:-};\" in *\";__sshdock_cwd;\"*) ;; *) "
+                "if [ -n \"${PROMPT_COMMAND:-}\" ]; then PROMPT_COMMAND=\"__sshdock_cwd;${PROMPT_COMMAND}\"; "
+                "else PROMPT_COMMAND=\"__sshdock_cwd\"; fi;; esac; fi; "
+                "__sshdock_cwd; "
+                "alias ll >/dev/null 2>&1 || alias ll='ls -alF --color=auto' 2>/dev/null; "
+                "alias la >/dev/null 2>&1 || alias la='ls -A --color=auto' 2>/dev/null; "
+                "command -v dircolors >/dev/null 2>&1 && eval \"$(dircolors -b 2>/dev/null)\"; "
+                "printf '\\r\\033[K'\\r"
+            )
+        elif shell_name == "zsh":
+            setup = (
+                "export TERM=\"xterm-256color\" COLORTERM=\"truecolor\" CLICOLOR=1; "
+                "__sshdock_cwd(){ printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; }; "
+                "autoload -Uz add-zsh-hook 2>/dev/null; "
+                "add-zsh-hook -d precmd __sshdock_cwd 2>/dev/null; "
+                "add-zsh-hook precmd __sshdock_cwd; "
+                "__sshdock_cwd; "
+                "alias ll >/dev/null 2>&1 || alias ll='ls -alF --color=auto' 2>/dev/null; "
+                "alias la >/dev/null 2>&1 || alias la='ls -A --color=auto' 2>/dev/null; "
+                "printf '\\r\\033[K'\\r"
+            )
+        elif shell_name == "fish":
+            setup = (
+                "set -gx TERM xterm-256color; set -gx COLORTERM truecolor; set -gx CLICOLOR 1; "
+                "functions -q __sshdock_cwd; or function __sshdock_cwd --on-event fish_prompt; "
+                "printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; end; "
+                "__sshdock_cwd; "
+                "printf '\\r\\033[K'\\r"
+            )
+        else:
+            setup = ""
         echo_disabled = False
         try:
             # Disable PTY echo separately. If stty -echo is embedded in the
