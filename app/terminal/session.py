@@ -169,12 +169,12 @@ class TerminalSession(QObject):
             echo_disabled = True
             await asyncio.sleep(0.04)
 
-            from app.terminal.docker_pretty import source_command
+            from app.terminal.docker_pretty import install_command
 
             parts = []
             if setup:
                 parts.append(setup)
-            parts.append(source_command(shell_name))
+            parts.append(install_command(manage_echo=False))
             parts.append("printf '\\033[2J\\033[H'")
             payload = "; ".join(parts) + "\r"
 
