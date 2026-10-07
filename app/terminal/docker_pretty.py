@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 
 TABLE_RESERVE_LINES = 20
+SH_SCRIPT_PATH = "/tmp/.sshdock_docker.sh"
+FISH_SCRIPT_PATH = "/tmp/.sshdock_docker.fish"
 
 DOCKER_PRETTY_SH = r"""# sshdock mdocker — table-capable docker list commands
 # After command: 20 blank lines, then prompt. App draws the HTML table on those lines.
@@ -70,6 +72,83 @@ alias msecret='mdocker secret ls'
 alias mconfig='mdocker config ls'
 """
 
+DOCKER_PRETTY_FISH = r"""# SSHDock mdocker integration for fish
+function __sshdock_magic
+  set -l joined (string join ' ' -- $argv)
+  printf '\e]777;sshdock-magic;%s\a' "$joined"
+  printf '\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n'
+end
+
+function mdocker
+  if test (count $argv) -lt 1
+    printf 'usage: mdocker <ps|images|volume|network|stats|compose|service|system|context|plugin|node|stack|secret|config> [args]\n' >&2
+    printf '  short: mdps mdpa mdimg mdvol mdnet mdstats mdcomp mdsvc mddf\n' >&2
+    printf '  native docker is left untouched; use mdocker for inline tables\n' >&2
+    return 1
+  end
+  __sshdock_magic $argv
+end
+
+alias m-docker='mdocker'
+alias magic-docker='mdocker'
+alias mdps='mdocker ps'
+alias mdpa='mdocker ps -a'
+alias mdimg='mdocker images'
+alias mdvol='mdocker volume ls'
+alias mdnet='mdocker network ls'
+alias mdstats='mdocker stats'
+alias mdcomp='mdocker compose ls'
+alias mdsvc='mdocker service ls'
+alias mddf='mdocker system df'
+alias mdctx='mdocker context ls'
+alias mdplug='mdocker plugin ls'
+alias mdnode='mdocker node ls'
+alias mdstack='mdocker stack ls'
+alias mdsecret='mdocker secret ls'
+alias mdconfig='mdocker config ls'
+alias mps='mdocker ps'
+alias mpa='mdocker ps -a'
+alias mimages='mdocker images'
+alias mimg='mdocker images'
+alias mvolume='mdocker volume ls'
+alias mvol='mdocker volume ls'
+alias mnetwork='mdocker network ls'
+alias mnet='mdocker network ls'
+alias mstats='mdocker stats'
+alias mcompose='mdocker compose ls'
+alias mcomp='mdocker compose ls'
+alias mservice='mdocker service ls'
+alias msvc='mdocker service ls'
+alias mdf='mdocker system df'
+alias msystem='mdocker system df'
+alias mcontext='mdocker context ls'
+alias mplugin='mdocker plugin ls'
+alias mnode='mdocker node ls'
+alias mstack='mdocker stack ls'
+alias msecret='mdocker secret ls'
+alias mconfig='mdocker config ls'
+"""
+
+def _write_script_command(path: str, content: str) -> str:
+    b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
+    return (
+        f"echo '{b64}' | (base64 -d 2>/dev/null || base64 --decode 2>/dev/null) "
+        f"> {path} 2>/dev/null"
+    )
+
+
+def prepare_command() -> str:
+    """Prepare both POSIX and fish integrations outside the interactive PTY."""
+    return _write_script_command(SH_SCRIPT_PATH, DOCKER_PRETTY_SH) + " && " + _write_script_command(
+        FISH_SCRIPT_PATH, DOCKER_PRETTY_FISH
+    )
+
+
+def source_command(shell_name: str = "") -> str:
+    if str(shell_name).strip().lower() == "fish":
+        return f"source {FISH_SCRIPT_PATH} 2>/dev/null"
+    return f". {SH_SCRIPT_PATH} 2>/dev/null"
+
 
 def install_command(*, manage_echo: bool = True) -> str:
     """Return the shell command used to install the mdocker integration.
@@ -77,12 +156,7 @@ def install_command(*, manage_echo: bool = True) -> str:
     When the caller already disabled PTY echo, ``manage_echo=False`` prevents
     the long base64 payload from being echoed by the remote shell.
     """
-    b64 = base64.b64encode(DOCKER_PRETTY_SH.encode("utf-8")).decode("ascii")
-    command = (
-        f"echo '{b64}' | (base64 -d 2>/dev/null || base64 --decode 2>/dev/null) "
-        "> /tmp/.sshdock_docker.sh 2>/dev/null && "
-        ". /tmp/.sshdock_docker.sh 2>/dev/null"
-    )
+    command = prepare_command() + " && " + source_command()
     if manage_echo:
         return "stty -echo 2>/dev/null; " + command + "; stty echo 2>/dev/null; printf '\\r\\033[K'"
     return command

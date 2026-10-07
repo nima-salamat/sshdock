@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from uuid import uuid4
 
@@ -8,6 +9,8 @@ from PySide6.QtCore import QObject, Signal
 
 from app.ssh.client import SSHServerConnection, SSHChannel
 from app.core.runtime import create_task
+
+log = logging.getLogger(__name__)
 
 # OSC 7: ESC ] 7 ; <payload> BEL   or   ESC ] 7 ; <payload> ESC \
 _OSC7_RE = re.compile(
@@ -57,6 +60,9 @@ class TerminalSession(QObject):
                 name=f"terminal-reader-{self.id[:8]}",
                 owner="terminal",
             )
+            # Prepare mdocker outside the live PTY so its base64 payload is
+            # never echoed by the interactive shell.
+            await self._prepare_shell_integration()
             # Let the user's shell finish normal startup before augmenting it.
             await asyncio.sleep(0.15)
             await self._install_shell_integration()
@@ -65,6 +71,17 @@ class TerminalSession(QObject):
             self.channel = None
             self.status.emit(f"● Failed: {exc}")
             raise
+
+    async def _prepare_shell_integration(self) -> None:
+        from app.terminal.docker_pretty import prepare_command
+
+        try:
+            result = await self.ssh.run(prepare_command(), timeout=5.0)
+            exit_code = getattr(result, "exit_code", getattr(result, "returncode", 0))
+            if int(exit_code or 0) != 0:
+                log.debug("SSHDock shell integration preparation returned %s", exit_code)
+        except Exception as exc:
+            log.debug("Could not prepare SSHDock shell integration: %s", exc, exc_info=True)
 
     async def _install_shell_integration(self):
         """Install SSHDock terminal integration on the already-running user shell.
@@ -139,17 +156,12 @@ class TerminalSession(QObject):
             echo_disabled = True
             await asyncio.sleep(0.04)
 
-            from app.terminal.docker_pretty import install_command
-            pretty = install_command(manage_echo=False)
+            from app.terminal.docker_pretty import source_command
 
             parts = []
             if setup:
                 parts.append(setup)
-            parts.append(pretty)
-            # Restore echo inside the same shell command, then clear everything
-            # SSHDock used during bootstrap. The user's configured prompt is
-            # rendered once, after this command returns.
-            parts.append("stty echo 2>/dev/null")
+            parts.append(source_command(shell_name))
             parts.append("printf '\\033[2J\\033[H'")
             payload = "; ".join(parts) + "\r"
 
@@ -157,10 +169,15 @@ class TerminalSession(QObject):
                 self.channel.write(payload.encode("utf-8")),
                 timeout=6.0,
             )
-            # The payload itself restores echo even if an individual setup part
-            # fails because commands are chained with ';'.
-            echo_disabled = False
+            # Sending the restore command separately keeps the echo invariant
+            # independent of shell error handling or a partial bootstrap payload.
             await asyncio.sleep(0.05)
+            await asyncio.wait_for(
+                self.channel.write(b"stty echo 2>/dev/null; printf '\\r\\033[K'\r"),
+                timeout=2.0,
+            )
+            await asyncio.sleep(0.03)
+            echo_disabled = False
         except Exception:
             if echo_disabled and self.channel and not self.channel.closed:
                 try:

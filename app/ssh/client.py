@@ -137,6 +137,24 @@ class SSHClientProtocol(asyncssh.SSHClient):
         return await self._cb(host, addr, fp, text)
 
 
+_TERMINAL_ENV = {
+    "TERM": "xterm-256color",
+    "COLORTERM": "truecolor",
+    "CLICOLOR": "1",
+}
+
+
+def _terminal_env(env=None):
+    """Build the environment used by an interactive PTY."""
+    if env is None:
+        return dict(_TERMINAL_ENV)
+    if isinstance(env, dict):
+        merged = dict(_TERMINAL_ENV)
+        merged.update({str(k): str(v) for k, v in env.items()})
+        return merged
+    return env
+
+
 class SSHChannel:
     def __init__(self, conn, process):
         self.connection = conn
@@ -591,7 +609,7 @@ class SSHServerConnection:
             raise RuntimeError("SSH connection is not established")
         create = self.connection.create_process(
             command=command if command is not None else (),
-            env=env or (),
+            env=_terminal_env(env),
             term_type="xterm-256color",
             term_size=(cols, rows),
             encoding="utf-8",
@@ -757,6 +775,7 @@ class SSHServerConnection:
             raise RuntimeError("SSH connection is not established")
         create = self.connection.create_process(
             command,
+            env=_terminal_env(None),
             term_type="xterm-256color",
             term_size=(cols, rows),
             encoding="utf-8",
