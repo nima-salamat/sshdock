@@ -146,6 +146,7 @@ class XtermTerminalWidget(QWidget):
         self._scrollbar = QScrollBar(Qt.Orientation.Vertical, self)
         self._scrollbar.setObjectName("terminalScrollBar")
         self._scrollbar.setRange(0, 0)
+        self._scrollbar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._scrollbar.setPageStep(1)
         self._scrollbar.setSingleStep(1)
         self._scrollbar.hide()
