@@ -47,6 +47,14 @@ def test_terminal_html_preserves_ansi_colors():
     assert "minimumContrastRatio: 1" in src
 
 
+def test_terminal_session_hides_bootstrap_commands_and_clears_screen():
+    src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
+    assert "payload = "; ".join(parts) + \"\\r\"" in src
+    assert 'parts.append("stty echo 2>/dev/null")' in src
+    assert 'parts.append("printf \'\\\\033[2J\\\\033[H\'")' in src
+    assert 'printf \'\\r\\033[K\'\\r"' not in src
+
+
 def test_terminal_session_preserves_color_capable_shell_environment():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     assert 'TERM=\"xterm-256color\"' in src
