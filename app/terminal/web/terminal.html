@@ -497,6 +497,10 @@
         }, 80);
       }
 
+      try { term.onWriteParsed(function(){ reportScrollState(); }); } catch (e) {}
+      try { term.onRender(function(){ reportScrollState(); }); } catch (e) {}
+      try { term.onScroll(function(){ reportScrollState(); }); } catch (e) {}
+
       window.addEventListener('resize', scheduleFit);
       // Observe container size (splitter drags)
       if (window.ResizeObserver) {
