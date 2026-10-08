@@ -266,3 +266,51 @@ def test_legacy_persisted_history_drops_unreliable_root_default():
     assert observations[0].cwd == ""
     assert observations[1].cwd == "/srv"
 
+def test_shell_learning_ignores_comments_and_splits_pasted_commands():
+    from app.terminal.predictor import split_shell_commands
+
+    assert split_shell_commands("# just a comment") == []
+    assert split_shell_commands("git status # inspect changes") == ["git status"]
+    assert split_shell_commands(
+        "# pasted notes\ngit status\ndocker ps; git log --oneline"
+    ) == ["git status", "docker ps", "git log --oneline"]
+    assert split_shell_commands("echo value#tag") == ["echo value#tag"]
+
+
+def test_shell_learning_joins_explicit_multiline_continuations():
+    from app.terminal.predictor import split_shell_commands
+
+    assert split_shell_commands("git log \\\n    --oneline -5") == [
+        "git log --oneline -5"
+    ]
+    assert split_shell_commands('printf "line one\\nline two"') == [
+        'printf "line one\\nline two"'
+    ]
+
+
+def test_shell_learning_rejects_incomplete_or_compound_script_blocks():
+    from app.terminal.predictor import split_shell_commands
+
+    assert split_shell_commands('echo "unfinished') == []
+    assert split_shell_commands("cat <<EOF\\nnot a command\\nEOF") == []
+    assert split_shell_commands(
+        "if true; then\\n echo should_not_be_learned\\nfi"
+    ) == []
+
+
+def test_add_command_learns_simple_children_not_comments_or_fragments():
+    predictor = CommandPredictor()
+
+    assert not predictor.add_command("# comment only", server_id="paste")
+    assert predictor.add_command(
+        "# notes\\ngit status; docker ps && git log \\\n --oneline",
+        server_id="paste",
+        cwd="/srv/app",
+    )
+
+    assert predictor.history(server_id="paste") == (
+        "git status",
+        "docker ps",
+        "git log --oneline",
+    )
+
