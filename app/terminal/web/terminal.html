@@ -715,6 +715,23 @@
         const value = String(data || '');
         if (!value) return;
 
+        /*
+         * A paste can arrive as one onData payload containing multiple lines.
+         * The inline prompt model cannot track those lines safely, but Python's
+         * shell-aware learner can split simple commands and ignore comments.
+         */
+        if (value.length > 1 && /[\\r\\n]/.test(value)) {
+          hideGhost();
+          hideSuggestions();
+          ghostAnchorX = null;
+          inputModel = '';
+          inputModelKnown = false;
+          if (bridge && bridge.report_command) {
+            try { bridge.report_command(value); } catch (e) {}
+          }
+          return;
+        }
+
         /* Printable insertion is only unambiguous at the local cursor. */
         if (/^[\x20-\x7e]+$/.test(value)) {
           inputModel += value;
