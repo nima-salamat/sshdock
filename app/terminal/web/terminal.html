@@ -703,9 +703,13 @@
       }
 
       function requestGhostPrediction(forceRefresh) {
-        // Refresh an open Ctrl+Space palette when history/context changes even
-        // if the inline ghost-shadow feature is disabled by user preference.
-        if (suggestionsVisible) requestSuggestions(false);
+        // When the explicit palette is open, refresh only that UI. Running the
+        // inline shadow predictor as well would duplicate the same ranking work.
+        if (suggestionsVisible) {
+          requestSuggestions(false);
+          hideGhost();
+          return;
+        }
 
         if (ghostPredictionTimer !== null) {
           clearTimeout(ghostPredictionTimer);
@@ -1044,6 +1048,7 @@
         if (ev.type === 'keydown' && ev.ctrlKey && !ev.altKey && (ev.key === ' ' || ev.code === 'Space')) {
           ev.preventDefault();
           ev.stopPropagation();
+          hideGhost();
           requestSuggestions(true);
           return false;
         }
