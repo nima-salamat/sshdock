@@ -78,3 +78,83 @@ __FISH__
     snapshot = parse_history_output(output)
     assert snapshot.shell == "/bin/zsh"
     assert snapshot.commands == ("docker compose ps",)
+
+
+def test_predictor_ranked_candidates_include_confidence_and_learning():
+    predictor = CommandPredictor()
+    predictor.ingest(
+        ["git status", "git status", "git diff", "git log"],
+        server_id="server",
+        cwd="/srv",
+        shell="/bin/bash",
+    )
+    ranked = predictor.suggest_ranked(
+        "git ",
+        server_id="server",
+        cwd="/srv",
+        shell="bash",
+        limit=3,
+    )
+    assert ranked
+    assert ranked[0].command in {"git status", "git diff", "git log"}
+    assert 50 <= ranked[0].confidence <= 99
+    assert ranked[0].source
+
+    target = ranked[-1].command
+    assert predictor.record_suggestion_acceptance(
+        target,
+        server_id="server",
+        cwd="/srv",
+        shell="/bin/bash",
+    )
+    assert target in predictor.history(server_id="server")
+
+
+def test_predictor_state_round_trip_preserves_learning():
+    predictor = CommandPredictor()
+    predictor.ingest(
+        ["docker ps", "docker images", "docker ps"],
+        server_id="a",
+        cwd="/srv",
+        shell="/bin/bash",
+    )
+    predictor.record_suggestion_acceptance(
+        "docker images",
+        server_id="a",
+        cwd="/srv",
+        shell="/bin/bash",
+    )
+    predictor.record_command_result("docker images", success=True, server_id="a")
+    state = predictor.state_dict()
+
+    restored = CommandPredictor()
+    restored.load_state_dict(state)
+    assert restored.history(server_id="a") == predictor.history(server_id="a")
+    assert restored.suggest(
+        "docker ",
+        server_id="a",
+        cwd="/srv",
+        shell="bash",
+    ) == predictor.suggest(
+        "docker ",
+        server_id="a",
+        cwd="/srv",
+        shell="bash",
+    )
+
+
+def test_predictor_remote_history_snapshot_is_idempotent():
+    predictor = CommandPredictor()
+    snapshot = parse_history_output(
+        "__SSHDock_SHELL__=/bin/bash
+"
+        "__BASH__
+"
+        "git status
+"
+        "git log
+"
+    )
+    assert predictor.ingest_snapshot(snapshot, server_id="srv") == 2
+    assert predictor.ingest_snapshot(snapshot, server_id="srv") == 0
+    assert predictor.history(server_id="srv") == ("git status", "git log")
