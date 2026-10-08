@@ -196,7 +196,29 @@ class CommandPredictor:
         return added
 
     def ingest_snapshot(self, snapshot: HistorySnapshot, *, server_id: str = "") -> int:
-        return self.ingest(snapshot.commands, server_id=server_id, shell=snapshot.shell)
+        commands = tuple(
+            normalize_prediction(command)
+            for command in snapshot.commands
+            if sanitize_command(command)
+        )
+        if not commands:
+            return 0
+        scope = self._scope(server_id)
+        payload = json.dumps(
+            {"shell": snapshot.shell or "", "commands": commands},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        fingerprint = hashlib.sha256(payload).hexdigest()
+        fingerprints = self._snapshot_fingerprints[scope]
+        if fingerprint in fingerprints:
+            return 0
+        fingerprints.append(fingerprint)
+        return self.ingest(
+            commands,
+            server_id=server_id,
+            shell=snapshot.shell,
+        )
 
     def history(self, *, server_id: str = "") -> tuple[str, ...]:
         return tuple(obs.command for obs in self._history[self._scope(server_id)])
