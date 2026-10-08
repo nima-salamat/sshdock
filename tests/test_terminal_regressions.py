@@ -497,3 +497,13 @@ def test_session_manager_auto_reconnects_unplanned_disconnects():
     assert "managed.profile.auto_reconnect" in src
     assert "managed.profile.max_retries" in src
     assert "reconnect_task.cancel()" in src
+
+
+def test_terminal_session_has_independent_auto_reconnect_for_its_pty_transport():
+    src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
+    assert "def _schedule_reconnect" in src
+    assert "async def _auto_reconnect" in src
+    assert "self.ssh.connect(with_worker_pool=False, with_command_transport=False)" in src
+    assert "self.channel = await self.ssh.open_shell()" in src
+    assert "terminal-auto-reconnect" in src
+    assert "self.status.emit(\"● Reconnecting…\")" in src

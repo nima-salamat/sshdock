@@ -42,6 +42,8 @@ class TerminalSession(QObject):
         self._close_lock = asyncio.Lock()
         self.cwd = "/"
         self._osc_buf = b""  # carry partial OSC sequences across reads
+        self._reconnect_task: asyncio.Task | None = None
+        self._reconnect_lock = asyncio.Lock()
 
     async def start(self):
         if self.running or self.channel:
@@ -270,6 +272,7 @@ class TerminalSession(QObject):
             if not self._closing:
                 self.running = False
                 self.status.emit("● Disconnected")
+                self._schedule_reconnect()
 
     async def write(self, data: bytes):
         if self._closing or not self.channel or self.channel.closed or not self.running:
@@ -289,7 +292,72 @@ class TerminalSession(QObject):
         except (asyncio.TimeoutError, ConnectionError, OSError):
             return
 
+    def _schedule_reconnect(self) -> None:
+        if self._closing or self._closed_emitted:
+            return
+        if not getattr(self.ssh.profile, "auto_reconnect", True):
+            return
+        task = self._reconnect_task
+        if task is not None and not task.done():
+            return
+        self._reconnect_task = create_task(
+            self._auto_reconnect(),
+            name=f"terminal-auto-reconnect-{self.id[:8]}",
+            owner="terminal-reconnect",
+        )
+
+    async def _auto_reconnect(self) -> None:
+        delay = max(0.2, float(getattr(self.ssh.profile, "retry_delay", 2.0) or 0.2))
+        retries = max(1, int(getattr(self.ssh.profile, "max_retries", 5) or 5))
+        try:
+            for attempt in range(1, retries + 1):
+                if self._closing or self._closed_emitted:
+                    return
+                self.status.emit("● Reconnecting…")
+                try:
+                    if not self.ssh.is_connected:
+                        await self.ssh.connect(with_worker_pool=False, with_command_transport=False)
+                    self.channel = await self.ssh.open_shell()
+                    self.running = True
+                    self.reader_task = create_task(
+                        self._reader(),
+                        name=f"terminal-reader-{self.id[:8]}",
+                        owner="terminal",
+                    )
+                    await self._install_shell_integration()
+                    size = getattr(self, "_last_size", None)
+                    if size:
+                        await self.resize(*size)
+                    self.status.emit("● Connected")
+                    return
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    log.warning(
+                        "Terminal auto-reconnect attempt %s/%s failed for %s: %s",
+                        attempt,
+                        retries,
+                        self.title,
+                        exc,
+                    )
+                    if attempt >= retries:
+                        self.status.emit("● Disconnected")
+                        return
+                    await asyncio.sleep(delay)
+                    delay = min(delay * 2.0, 30.0)
+        finally:
+            if self._reconnect_task is asyncio.current_task():
+                self._reconnect_task = None
+
     async def close(self):
+        reconnect_task = self._reconnect_task
+        self._reconnect_task = None
+        if reconnect_task is not None and reconnect_task is not asyncio.current_task() and not reconnect_task.done():
+            reconnect_task.cancel()
+            try:
+                await asyncio.wait_for(reconnect_task, timeout=0.5)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
         async with self._close_lock:
             if self._closed_emitted:
                 return
