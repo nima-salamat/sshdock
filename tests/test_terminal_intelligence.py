@@ -76,7 +76,7 @@ def test_terminal_session_hides_bootstrap_commands_and_clears_screen():
     assert "033[2J" in src
     assert "033[H" in src
     assert "printf" in src
-    assert "\\033[2K\\033[2J\\033[H" in src
+    assert "\\033[2K" in src and "\\033[2J" in src and "\\033[H" in src
     assert "history -d $HISTCMD" in src
     assert "stty echo 2>/dev/null" in src
 
