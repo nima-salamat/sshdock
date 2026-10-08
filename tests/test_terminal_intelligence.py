@@ -249,7 +249,7 @@ def test_main_window_applies_terminal_ai_preferences_to_existing_terminals():
 
 def test_open_suggestion_palette_refreshes_when_terminal_context_changes():
     html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
-    start = html.index("function requestGhostPrediction()")
+    start = html.index("function requestGhostPrediction(")
     end = html.index("function setInputModel(", start)
     prediction = html[start:end]
 
