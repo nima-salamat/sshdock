@@ -35,6 +35,23 @@ def normalize_prediction(command: str) -> str:
     return f"{match.group('command')} {match.group('target')}"
 
 
+def normalize_suggestions(commands: Iterable[str] | str | None, *, limit: int = 5) -> list[str]:
+    """Normalize, deduplicate, and bound completion values without Qt dependencies."""
+    if isinstance(commands, str):
+        commands = [commands] if commands else []
+    values: list[str] = []
+    seen: set[str] = set()
+    for command in commands or ():
+        value = normalize_prediction(str(command or "").strip())
+        key = value.casefold()
+        if value and key not in seen:
+            seen.add(key)
+            values.append(value)
+        if len(values) >= max(1, min(5, int(limit))):
+            break
+    return values
+
+
 _ASSIGNMENT_SECRET = re.compile(
     r"(?i)\b(?:password|passwd|token|api[_-]?key|secret|access[_-]?key|private[_-]?key)\s*="
 )

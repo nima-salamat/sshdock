@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import json
 
+from app.terminal.predictor import normalize_suggestions
 from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QScrollBar
 
@@ -60,19 +61,7 @@ class _Bridge(QObject):
             return "[]"
         try:
             result = provider(prefix or "", cwd or "/", shell or "", server_id or "")
-            if isinstance(result, str):
-                result = [result] if result else []
-            values = []
-            seen = set()
-            for item in result or []:
-                value = str(item or "").strip()
-                key = value.casefold()
-                if value and key not in seen:
-                    seen.add(key)
-                    values.append(value)
-                if len(values) >= 5:
-                    break
-            return json.dumps(values, ensure_ascii=False)
+            return json.dumps(normalize_suggestions(result, limit=5), ensure_ascii=False)
         except Exception:
             return "[]"
 

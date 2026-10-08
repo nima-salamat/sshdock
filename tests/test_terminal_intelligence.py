@@ -177,16 +177,13 @@ def test_predictor_returns_five_context_ranked_suggestions_including_empty_promp
     assert len({command.casefold() for command in empty_results}) == len(empty_results)
 
 
-def test_bridge_returns_at_most_five_json_suggestions():
-    import json
-    from app.terminal.web_widget import _Bridge
+def test_suggestion_list_is_deduplicated_and_bounded():
+    from app.terminal.predictor import normalize_suggestions
 
-    bridge = _Bridge()
-    bridge.suggestions_provider = lambda *args: [
-        "git status", "git log", "git diff", "git pull", "git push", "git branch"
-    ]
-
-    result = json.loads(bridge.suggest_commands("git", "/", "bash", "server"))
+    result = normalize_suggestions(
+        ["git status", "git log", "git diff", "git pull", "git push", "git branch", "GIT STATUS"],
+        limit=5,
+    )
 
     assert result == ["git status", "git log", "git diff", "git pull", "git push"]
 
