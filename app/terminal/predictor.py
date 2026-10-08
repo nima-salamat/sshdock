@@ -7,11 +7,13 @@ All remote history is sanitized before it reaches this module.
 from __future__ import annotations
 
 from collections import Counter, defaultdict, deque
+import hashlib
+import json
 from dataclasses import dataclass
 import math
 import re
 import shlex
-from typing import Iterable
+from typing import Any, Iterable, Mapping
 
 
 _SECRET_PATTERNS = (
@@ -89,8 +91,43 @@ class HistorySnapshot:
     shell: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class PredictionCandidate:
+    command: str
+    score: float
+    confidence: float
+    source: str
+    reason: str
+    features: Mapping[str, float]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command": self.command,
+            "score": round(float(self.score), 4),
+            "confidence": round(float(self.confidence), 3),
+            "source": self.source,
+            "reason": self.reason,
+            "features": {str(k): round(float(v), 4) for k, v in self.features.items()},
+        }
+
+
 class CommandPredictor:
-    """Deterministic lightweight predictor with bounded in-memory state."""
+    """Small contextual online-learning ranker with bounded local state."""
+
+    STATE_VERSION = 2
+    DEFAULT_WEIGHTS = {
+        "bias": 0.35,
+        "frequency": 2.6,
+        "recency": 2.2,
+        "transition": 2.9,
+        "cwd": 1.65,
+        "shell": 1.05,
+        "token_fit": 2.5,
+        "prefix_fit": 1.35,
+        "accepted": 2.9,
+        "success": 0.75,
+        "failure": -1.75,
+    }
 
     def __init__(self, *, max_commands: int = 1200) -> None:
         self.max_commands = max(50, int(max_commands))
@@ -100,6 +137,11 @@ class CommandPredictor:
         self._counts: dict[str, Counter[str]] = defaultdict(Counter)
         self._last_seen: dict[str, dict[str, int]] = defaultdict(dict)
         self._transitions: dict[str, Counter[tuple[str, str]]] = defaultdict(Counter)
+        self._accepted: dict[str, Counter[str]] = defaultdict(Counter)
+        self._success: dict[str, Counter[str]] = defaultdict(Counter)
+        self._failure: dict[str, Counter[str]] = defaultdict(Counter)
+        self._snapshot_fingerprints: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=32))
+        self._weights: dict[str, float] = dict(self.DEFAULT_WEIGHTS)
         self._clock = 0
 
     @staticmethod
