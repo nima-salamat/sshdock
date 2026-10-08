@@ -146,14 +146,10 @@ def test_predictor_state_round_trip_preserves_learning():
 def test_predictor_remote_history_snapshot_is_idempotent():
     predictor = CommandPredictor()
     snapshot = parse_history_output(
-        "__SSHDock_SHELL__=/bin/bash
-"
-        "__BASH__
-"
-        "git status
-"
-        "git log
-"
+        "__SSHDock_SHELL__=/bin/bash\n"
+        "__BASH__\n"
+        "git status\n"
+        "git log\n"
     )
     assert predictor.ingest_snapshot(snapshot, server_id="srv") == 2
     assert predictor.ingest_snapshot(snapshot, server_id="srv") == 0
