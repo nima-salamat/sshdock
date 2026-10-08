@@ -157,7 +157,9 @@ def test_compose_panel_table_is_resizable():
     # Compose now delegates common resize behavior to StandardTableWidget.
     assert "StandardTableWidget" in COMPOSE_PANEL_SRC
     assert "ColumnSpec" in COMPOSE_PANEL_SRC
-    assert "setStretchLastSection(False)" in COMPOSE_PANEL_SRC
+    table_src = (ROOT / "app/ui/widgets/table.py").read_text(encoding="utf-8")
+    assert "setStretchLastSection(False)" in table_src
+    assert "ResizeMode.Interactive" in table_src
 
 
 # --------------------------------------------------------------------------
@@ -171,7 +173,9 @@ def test_file_browser_table_is_resizable():
     # File browser delegates common resize behavior to StandardTableWidget.
     assert "StandardTableWidget" in BROWSER_SRC
     assert "ColumnSpec" in BROWSER_SRC
-    assert "setStretchLastSection(False)" in BROWSER_SRC
+    table_src = (ROOT / "app/ui/widgets/table.py").read_text(encoding="utf-8")
+    assert "setStretchLastSection(False)" in table_src
+    assert "ResizeMode.Interactive" in table_src
 
 
 # --------------------------------------------------------------------------

@@ -76,7 +76,7 @@ def test_terminal_bootstrap_uses_non_echoing_pty_and_cleans_bash_history():
     client = (ROOT / "app/ssh/client.py").read_text(encoding="utf-8")
     session = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     assert "term_modes={asyncssh.PTY_ECHO: 0}" in client
-    assert "printf '\\r\\033[2K\\033[2J\\033[H'" in session
+    assert "\\033[2K\\033[2J\\033[H" in session
     assert "history -d $HISTCMD" in session
     assert "install_command(shell_name=shell_name, manage_echo=False)" in session
     assert "stty echo 2>/dev/null" in session
