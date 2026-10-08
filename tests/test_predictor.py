@@ -275,6 +275,9 @@ def test_shell_learning_ignores_comments_and_splits_pasted_commands():
         "# pasted notes\ngit status\ndocker ps; git log --oneline"
     ) == ["git status", "docker ps", "git log --oneline"]
     assert split_shell_commands("echo value#tag") == ["echo value#tag"]
+    assert split_shell_commands("git log \\") == []
+    assert split_shell_commands("function helper() { echo no; }") == []
+
 
 
 def test_shell_learning_joins_explicit_multiline_continuations():
