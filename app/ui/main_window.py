@@ -41,7 +41,7 @@ from app.ui.dialogs import ErrorDialog, ConfirmRemoveDialog
 from app.files.highlighter import CodeHighlighter
 from app.ui.container_details import ContainerDetailsWindow
 from app.ui.widgets import NavButton, MetricCard, icon_button, AutoRefreshControl, TableAutoRefresh
-from app.ui.widgets.table import StandardTableWidget
+from app.ui.widgets.table import StandardTableWidget, TableActionMenuController, create_table_actions_cell
 from app.ui.resource_monitor import ResourceMonitorDialog
 from app.workers.task_manager import TaskManager
 
@@ -88,6 +88,15 @@ class MainWindow(QMainWindow):
         self.store = store
         self.current_id: str | None = None
         self.terms: dict[str, Any] = {}
+        # Row menus live outside table cells so live refreshes cannot destroy
+        # an Actions popup that is currently open.
+        self._table_action_menu = TableActionMenuController(
+            self,
+            icon_factory=(
+                lambda icon_name: qta.icon(icon_name, color=self._ui_icon_color())
+                if qta is not None else None
+            ),
+        )
         self.terminal_widgets: dict[str, QWidget] = {}
         self._magic_table_kind: dict[str, str] = {}
         self.terminal_meta: dict[str, QLabel] = {}
@@ -1759,11 +1768,12 @@ class MainWindow(QMainWindow):
         for n, b in self._nav_buttons.items():
             b.setChecked(n == name)
         if self.current_id and name != "Terminal":
+            self._table_action_menu.dismiss()
             previous = getattr(self, "_page_refresh_task", None)
             if previous is not None and not previous.done():
                 previous.cancel()
             self._page_refresh_task = self._spawn(
-                self.refresh_current_page(),
+                self.refresh_current_page(show_progress=True),
                 name=f"Load page: {name}",
             )
 
@@ -1837,8 +1847,8 @@ class MainWindow(QMainWindow):
             log.exception("Background task failed")
             self.statusBar().showMessage(str(exc),7000)
 
-    def _show_page_spinner(self, show: bool):
-        page = self.stack.currentWidget()
+    def _show_page_spinner(self, show: bool, page: QWidget | None = None):
+        page = page or self.stack.currentWidget()
         if page is None:
             return
         spinner = getattr(page, "_page_spinner", None)
@@ -1854,7 +1864,7 @@ class MainWindow(QMainWindow):
                 layout.insertWidget(0, spinner)
         spinner.setVisible(show)
 
-    async def refresh_current_page(self):
+    async def refresh_current_page(self, *, show_progress: bool = False):
         if not self.current_id:
             return
         name=self.title.text()
@@ -1862,18 +1872,28 @@ class MainWindow(QMainWindow):
         fn=mapping.get(name)
         if not fn:
             return
-        self._show_page_spinner(True)
+
+        # Full-page progress is for navigation/initial loads only. Routine
+        # manual/auto refreshes update the table in place without flashing it.
+        page = self.stack.currentWidget()
+        if show_progress and page is not None:
+            depth = int(getattr(page, "_page_spinner_depth", 0)) + 1
+            page._page_spinner_depth = depth
+            self._show_page_spinner(True, page)
+
         self.refresh_btn.setEnabled(False)
         try:
             await fn()
         except Exception as exc:
             log.exception("Page refresh failed: %s", name)
             self.statusBar().showMessage(f"{name} failed: {exc}", 8000)
-            # Keep the UI usable and show a concise error rather than leaving a task exception.
             if name == "Containers" and hasattr(self, "container_table"):
                 self.container_table.setRowCount(0)
         finally:
-            self._show_page_spinner(False)
+            if show_progress and page is not None:
+                depth = max(0, int(getattr(page, "_page_spinner_depth", 1)) - 1)
+                page._page_spinner_depth = depth
+                self._show_page_spinner(depth > 0, page)
             self._set_connection_buttons(bool(self.current_id and self.manager.servers.get(self.current_id) and self.manager.servers[self.current_id].ssh.is_connected))
 
     def _refresh_server_picker(self):
@@ -2321,46 +2341,20 @@ class MainWindow(QMainWindow):
 
 
     def _actions_cell(self, entries: list, tip: str = "Actions") -> QWidget:
-        """Compact Actions menu button that fits inside table rows."""
-        b = QToolButton()
-        b.setObjectName("rowMenuButton")
-        b.setText("Actions")
-        b.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        b.setIconSize(QSize(12, 12))
-        b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        b.setFixedHeight(26)
-        b.setMinimumWidth(86)
-        b.setToolTip(tip)
-        if qta:
+        """Build a refresh-safe, consistently styled Actions cell."""
+        icon = None
+        if qta is not None:
             try:
-                b.setProperty("sshdockIconName", "fa5s.ellipsis-h")
-                b.setProperty("sshdockIconRole", "normal")
-                b.setIcon(qta.icon("fa5s.ellipsis-h", color=self._ui_icon_color()))
+                icon = qta.icon("fa5s.ellipsis-h", color=self._ui_icon_color())
             except Exception:
                 pass
-        menu = QMenu(b)
-        for item in entries:
-            if item is None:
-                menu.addSeparator()
-                continue
-            label, icon, cb = item
-            act = menu.addAction(label)
-            if qta and icon:
-                try:
-                    act.setIcon(qta.icon(icon, color=self._ui_icon_color()))
-                except Exception:
-                    pass
-            act.triggered.connect(cb)
-        b.setMenu(menu)
-        w = QWidget()
-        w.setStyleSheet("background:transparent;")
-        hl = QHBoxLayout(w)
-        hl.setContentsMargins(4, 2, 4, 2)
-        hl.setSpacing(0)
-        hl.addWidget(b)
-        hl.addStretch()
-        return w
+        return create_table_actions_cell(
+            self._table_action_menu,
+            entries,
+            tooltip=tip,
+            icon=icon,
+        )
+
 
     def _action_button(self, text, fn, icon_name=None, tooltip=None):
         icon_map={"Start":"fa5s.play","Stop":"fa5s.stop","Restart":"fa5s.redo","Logs":"fa5s.file-alt","Terminal":"fa5s.terminal","Remove":"fa5s.trash","Inspect":"fa5s.search","Files":"fa5s.folder-open","Hide":"fa5s.chevron-down","New":"fa5s.plus","New Terminal":"fa5s.terminal","Rename":"fa5s.pen","Expand":"fa5s.expand-alt","Clear":"fa5s.eraser","Close":"fa5s.times"}
@@ -4223,34 +4217,31 @@ class MainWindow(QMainWindow):
 
 
     def _compose_row_actions(self, project):
-        w=QWidget(); l=QHBoxLayout(w); l.setContentsMargins(4,2,4,2); l.setSpacing(4)
-        menu_btn=QToolButton(); menu_btn.setObjectName("rowMenuButton"); menu_btn.setText("Actions"); menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup); menu_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon); menu_btn.setFixedHeight(26); menu_btn.setMinimumWidth(96); menu_btn.setMaximumWidth(120); menu_btn.setToolTip(f"Compose actions for {project}")
-        if qta:
+        entries = [
+            ("Up", "fa5s.play", lambda _=False, p=project: self._spawn(self._compose_action_for_project("up", p))),
+            ("Start", "fa5s.play-circle", lambda _=False, p=project: self._spawn(self._compose_action_for_project("start", p))),
+            ("Stop", "fa5s.stop-circle", lambda _=False, p=project: self._spawn(self._compose_action_for_project("stop", p))),
+            ("Down", "fa5s.stop", lambda _=False, p=project: self._spawn(self._compose_action_for_project("down", p))),
+            ("Restart", "fa5s.redo", lambda _=False, p=project: self._spawn(self._compose_action_for_project("restart", p))),
+            ("Pull", "fa5s.download", lambda _=False, p=project: self._spawn(self._compose_action_for_project("pull", p))),
+            ("Build", "fa5s.hammer", lambda _=False, p=project: self._spawn(self._compose_action_for_project("build", p))),
+            None,
+            ("Copy project name", "fa5s.copy", lambda _=False, p=project: QApplication.clipboard().setText(p)),
+            ("Unregister project", "fa5s.trash", lambda _=False, p=project: self._unregister_compose_project(p)),
+        ]
+        icon = None
+        if qta is not None:
             try:
-                menu_btn.setProperty("sshdockIconName", "fa5s.bars")
-                menu_btn.setProperty("sshdockIconRole", "normal")
-                menu_btn.setIcon(qta.icon("fa5s.bars", color=self._ui_icon_color()))
-            except Exception: pass
-        menu=QMenu(menu_btn)
-        for label,action,icon in [
-            ("Up","up","fa5s.play"),
-            ("Start","start","fa5s.play-circle"),
-            ("Stop","stop","fa5s.stop-circle"),
-            ("Down","down","fa5s.stop"),
-            ("Restart","restart","fa5s.redo"),
-            ("Pull","pull","fa5s.download"),
-            ("Build","build","fa5s.hammer"),
-        ]:
-            act=menu.addAction(
-                qta.icon(icon, color=self._ui_icon_color()) if qta
-                else menu_btn.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton),
-                label,
-            )
-            act.triggered.connect(lambda _=False,a=action,p=project:self._spawn(self._compose_action_for_project(a,p)))
-        menu.addSeparator()
-        cp=menu.addAction("Copy project name"); cp.triggered.connect(lambda _=False,p=project:QApplication.clipboard().setText(p))
-        rm=menu.addAction("Unregister project"); rm.triggered.connect(lambda _=False,p=project:self._unregister_compose_project(p))
-        menu_btn.setMenu(menu); l.addWidget(menu_btn); return w
+                icon = qta.icon("fa5s.bars", color=self._ui_icon_color())
+            except Exception:
+                pass
+        return create_table_actions_cell(
+            self._table_action_menu,
+            entries,
+            tooltip=f"Compose actions for {project}",
+            icon=icon,
+        )
+
 
     async def start_events(self):
         if not self.current_id:

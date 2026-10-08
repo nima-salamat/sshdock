@@ -8,8 +8,8 @@ from typing import Any, Callable, Awaitable
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QDialog, QDialogButtonBox, QFormLayout,
-    QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QMessageBox,
-    QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QToolButton,
+    QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox,
+    QPlainTextEdit, QPushButton, QTableWidgetItem, QToolButton,
     QVBoxLayout, QWidget, QApplication, QStyle,
 )
 
@@ -17,6 +17,7 @@ from app.docker.manager import DockerManager
 from app.storage.settings import SettingsStore
 from app.ui.notifications import NotificationBus
 from app.ui.widgets import icon_button, AutoRefreshControl, TableAutoRefresh
+from app.ui.widgets.table import ColumnSpec, StandardTableWidget, TableActionMenuController, create_table_actions_cell
 from app.ui.job_tabs import MultiTabJobDialog
 
 try:
@@ -44,6 +45,10 @@ class ComposePanel:
         self.parent = parent
         self._compose_rows: list[dict[str, Any]] = []
         self._log_proc = None
+        self._table_action_menu = TableActionMenuController(
+            parent,
+            icon_factory=lambda icon_name: qta.icon(icon_name) if qta is not None else None,
+        )
         self._auto_refresh = TableAutoRefresh(parent)
         self._auto_refresh_control = AutoRefreshControl(5)
         self.page = self._build_page()
@@ -133,27 +138,20 @@ class ComposePanel:
         panel.setObjectName("panel")
         pl = QVBoxLayout(panel)
         pl.setContentsMargins(12, 12, 12, 12)
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["", "Project", "Status", "Config files", "Actions"])
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setAlternatingRowColors(True)
-        # All columns Interactive so the user can resize every one of them.
-        h = self.table.horizontalHeader()
-        h.setStretchLastSection(False)
-        for c in range(self.table.columnCount()):
-            h.setSectionResizeMode(c, QHeaderView.ResizeMode.Interactive)
-        h.setMinimumSectionSize(40)
-        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        self.table.setColumnWidth(0, 40)
-        self.table.setColumnWidth(1, 180)
-        self.table.setColumnWidth(2, 120)
-        self.table.setColumnWidth(3, 260)
-        self.table.setColumnWidth(4, 132)
-        self.table.verticalHeader().setDefaultSectionSize(50)
+        self.table = StandardTableWidget(0, 5, panel)
+        self.table.configure_columns([
+            ColumnSpec("", key="selected", default_width=40, min_width=34, sortable=False, copyable=False),
+            ColumnSpec("Project", key="project", default_width=180),
+            ColumnSpec("Status", key="status", default_width=120),
+            ColumnSpec("Config files", key="config_files", default_width=260),
+            ColumnSpec("Actions", key="actions", default_width=120, sortable=False, copyable=False),
+        ])
+        self.table.configure_standard(
+            selection_behavior=QAbstractItemView.SelectionBehavior.SelectRows,
+            selection_mode=QAbstractItemView.SelectionMode.ExtendedSelection,
+            sorting=False,
+        )
+        self.table.verticalHeader().setDefaultSectionSize(40)
         self.table.itemSelectionChanged.connect(self._on_table_selection_changed)
         self.table.itemChanged.connect(self._on_check_changed)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -922,48 +920,32 @@ class ComposePanel:
 
     # ── row actions / menus ───────────────────────────────────
     def _row_actions(self, project: str) -> QWidget:
-        w = QWidget()
-        l = QHBoxLayout(w)
-        l.setContentsMargins(4, 2, 4, 2)
-        l.setSpacing(4)
-        menu_btn = QToolButton()
-        menu_btn.setObjectName("rowMenuButton")
-        menu_btn.setText("Actions")
-        menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        menu_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        menu_btn.setFixedHeight(26)
-        menu_btn.setMinimumWidth(96)
-        menu_btn.setMaximumWidth(120)
-        if qta:
+        entries = [
+            ("Up", "fa5s.play", lambda _=False, p=project: self.spawn(self.action_for_project("up", p))),
+            ("Start", "fa5s.play-circle", lambda _=False, p=project: self.spawn(self.action_for_project("start", p))),
+            ("Stop", "fa5s.stop-circle", lambda _=False, p=project: self.spawn(self.action_for_project("stop", p))),
+            ("Down", "fa5s.stop", lambda _=False, p=project: self.spawn(self.action_for_project("down", p))),
+            ("Restart", "fa5s.redo", lambda _=False, p=project: self.spawn(self.action_for_project("restart", p))),
+            ("Pull", "fa5s.download", lambda _=False, p=project: self.spawn(self.action_for_project("pull", p))),
+            ("Build", "fa5s.hammer", lambda _=False, p=project: self.spawn(self.action_for_project("build", p))),
+            ("Logs", "fa5s.file-alt", lambda _=False, p=project: self.open_logs(p)),
+            None,
+            ("Copy project name", "fa5s.copy", lambda _=False, p=project: QApplication.clipboard().setText(p)),
+            ("Unregister project", "fa5s.trash", lambda _=False, p=project: self.unregister(p)),
+        ]
+        icon = None
+        if qta is not None:
             try:
-                menu_btn.setIcon(qta.icon("fa5s.bars", color="#dce6f0"))
+                icon = qta.icon("fa5s.bars", color="#dce6f0")
             except Exception:
                 pass
-        menu = QMenu(menu_btn)
-        for label, action, icon in [
-            ("Up", "up", "fa5s.play"),
-            ("Start", "start", "fa5s.play-circle"),
-            ("Stop", "stop", "fa5s.stop-circle"),
-            ("Down", "down", "fa5s.stop"),
-            ("Restart", "restart", "fa5s.redo"),
-            ("Pull", "pull", "fa5s.download"),
-            ("Build", "build", "fa5s.hammer"),
-            ("Logs", "logs", "fa5s.file-alt"),
-        ]:
-            if action == "logs":
-                act = menu.addAction(qta.icon(icon) if qta else menu_btn.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogInfoView), label)
-                act.triggered.connect(lambda _=False, p=project: self.open_logs(p))
-            else:
-                act = menu.addAction(qta.icon(icon) if qta else menu_btn.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton), label)
-                act.triggered.connect(lambda _=False, a=action, p=project: self.spawn(self.action_for_project(a, p)))
-        menu.addSeparator()
-        cp = menu.addAction("Copy project name")
-        cp.triggered.connect(lambda _=False, p=project: QApplication.clipboard().setText(p))
-        rm = menu.addAction("Unregister project")
-        rm.triggered.connect(lambda _=False, p=project: self.unregister(p))
-        menu_btn.setMenu(menu)
-        l.addWidget(menu_btn)
-        return w
+        return create_table_actions_cell(
+            self._table_action_menu,
+            entries,
+            tooltip=f"Compose actions for {project}",
+            icon=icon,
+        )
+
 
     def _context_menu(self, pos) -> None:
         row = self.table.rowAt(pos.y())

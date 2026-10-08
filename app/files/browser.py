@@ -15,8 +15,8 @@ from typing import Callable, Awaitable
 from PySide6.QtCore import Qt, QSize, QTimer, QStringListModel
 from PySide6.QtWidgets import (
     QApplication, QAbstractItemView, QFileDialog, QFrame, QHBoxLayout,
-    QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox,
-    QCompleter, QDialog, QPlainTextEdit, QPushButton, QSplitter, QTableWidget, QTableWidgetItem,
+    QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox,
+    QCompleter, QDialog, QPlainTextEdit, QPushButton, QSplitter, QTableWidgetItem,
     QToolButton, QVBoxLayout, QWidget, QTabWidget
 )
 
@@ -24,6 +24,7 @@ from app.docker.manager import DockerManager
 from app.files.highlighter import CodeHighlighter
 from app.files.file_types import classify, color_for
 from app.ui.widgets import AutoRefreshControl, TableAutoRefresh
+from app.ui.widgets.table import ColumnSpec, StandardTableWidget
 from app.ui.dialogs import ErrorDialog
 
 
@@ -458,32 +459,20 @@ class FileBrowserPane(QWidget):
         acts.addWidget(self.status)
         root.addLayout(acts)
 
-        self.table = QTableWidget(0, 5)
+        self.table = StandardTableWidget(0, 5, self)
         self.table.setObjectName("feTable")
-        self.table.setHorizontalHeaderLabels(["Name", "Type", "Size", "Modified", "Mode"])
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setAlternatingRowColors(True)
-        self.table.setShowGrid(False)
-        self.table.setSortingEnabled(True)
-        self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(28)
-        # All columns Interactive so the user can resize every column,
-        # including the Name column (previously Stretch, which blocked
-        # user dragging).
-        self.table.horizontalHeader().setStretchLastSection(False)
-        for c in range(self.table.columnCount()):
-            self.table.horizontalHeader().setSectionResizeMode(c, QHeaderView.ResizeMode.Interactive)
-        self.table.horizontalHeader().setMinimumSectionSize(40)
-        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        self.table.setColumnWidth(0, 260)
-        self.table.setColumnWidth(1, 80)
-        self.table.setColumnWidth(2, 88)
-        self.table.setColumnWidth(3, 128)
-        self.table.setColumnWidth(4, 72)
-        self.table.setIconSize(QSize(16, 16))
+        self.table.configure_columns([
+            ColumnSpec("Name", key="name", default_width=260, min_width=140),
+            ColumnSpec("Type", key="type", default_width=90, min_width=70),
+            ColumnSpec("Size", key="size", default_width=100, min_width=80),
+            ColumnSpec("Modified", key="modified", default_width=140, min_width=110),
+            ColumnSpec("Mode", key="mode", default_width=90, min_width=70),
+        ])
+        self.table.configure_standard(
+            selection_behavior=QAbstractItemView.SelectionBehavior.SelectRows,
+            selection_mode=QAbstractItemView.SelectionMode.ExtendedSelection,
+            sorting=True,
+        )
         root.addWidget(self.table, 1)
 
         self.btn_open.clicked.connect(self.open_selected)

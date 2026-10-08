@@ -45,3 +45,32 @@ def test_containers_and_docker_results_use_shared_table_widget():
     assert "install_standard_context_menu" not in containers
     assert "StandardTableWidget" in docker
     assert "install_standard_context_menu" in docker
+
+
+def test_all_user_tables_use_shared_table_widget():
+    compose = (ROOT / "app/ui/compose_panel.py").read_text(encoding="utf-8")
+    browser = (ROOT / "app/files/browser.py").read_text(encoding="utf-8")
+    assert "StandardTableWidget" in compose
+    assert "QTableWidget(" not in compose
+    assert "StandardTableWidget" in browser
+    assert "QTableWidget(" not in browser
+
+
+def test_row_actions_use_persistent_shared_menu():
+    table = (ROOT / "app/ui/widgets/table.py").read_text(encoding="utf-8")
+    main = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
+    compose = (ROOT / "app/ui/compose_panel.py").read_text(encoding="utf-8")
+    assert "class TableActionMenuController" in table
+    assert "self.menu = QMenu(parent)" in table
+    assert "self.menu.popup(" in table
+    assert "create_table_actions_cell(" in main
+    assert "create_table_actions_cell(" in compose
+    assert "b.setMenu(menu)" not in main
+    assert "menu_btn.setMenu(menu)" not in compose
+
+
+def test_routine_page_refresh_does_not_show_full_page_progress():
+    src = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
+    assert "async def refresh_current_page(self, *, show_progress: bool = False)" in src
+    assert "self.refresh_current_page(show_progress=True)" in src
+    assert "if show_progress and page is not None:" in src

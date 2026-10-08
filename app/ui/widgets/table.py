@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Awaitable, Callable, Iterable
 
-from PySide6.QtCore import QTimer, Qt, QPoint, Signal, QDateTime
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtCore import QTimer, Qt, QPoint, Signal, QDateTime, QObject, QSize
+from PySide6.QtGui import QAction, QKeySequence, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -51,6 +52,103 @@ class ColumnSpec:
     sortable: bool = True
     copyable: bool = True
     hidden: bool = False
+
+
+TableActionEntry = tuple[str, str | None, Callable[[], Any]] | None
+
+
+class TableActionMenuController(QObject):
+    """Own one menu outside table rows so row refreshes cannot destroy it."""
+
+    def __init__(
+        self,
+        parent=None,
+        *,
+        icon_factory: Callable[[str], QIcon | None] | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._icon_factory = icon_factory
+        self.menu = QMenu(parent)
+        self.menu.setObjectName("sharedTableActionMenu")
+
+    def dismiss(self) -> None:
+        if self.menu.isVisible():
+            self.menu.hide()
+
+    def popup_for(
+        self,
+        anchor: QWidget,
+        entries: Iterable[TableActionEntry],
+    ) -> None:
+        self.menu.clear()
+        for entry in entries:
+            if entry is None:
+                self.menu.addSeparator()
+                continue
+            label, icon_name, callback = entry
+            action = self.menu.addAction(str(label))
+            if icon_name and self._icon_factory is not None:
+                try:
+                    icon = self._icon_factory(icon_name)
+                    if icon is not None and not icon.isNull():
+                        action.setIcon(icon)
+                except Exception:
+                    pass
+            action.triggered.connect(
+                lambda _checked=False, cb=callback: cb()
+            )
+        self.menu.popup(anchor.mapToGlobal(QPoint(0, anchor.height())))
+
+
+class TableActionButton(QToolButton):
+    """Compact Actions button using the table-wide persistent action menu."""
+
+    def __init__(
+        self,
+        controller: TableActionMenuController,
+        entries: Iterable[TableActionEntry],
+        *,
+        tooltip: str = "Actions",
+        icon: QIcon | None = None,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self._controller = controller
+        self._entries = tuple(entries)
+        self.setObjectName("rowMenuButton")
+        self.setText("Actions")
+        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.setIconSize(QSize(12, 12))
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setFixedHeight(28)
+        self.setMinimumWidth(96)
+        self.setMaximumWidth(120)
+        self.setToolTip(tooltip)
+        if icon is not None and not icon.isNull():
+            self.setIcon(icon)
+        self.clicked.connect(self._show_actions)
+
+    def _show_actions(self) -> None:
+        self._controller.popup_for(self, self._entries)
+
+
+def create_table_actions_cell(
+    controller: TableActionMenuController,
+    entries: Iterable[TableActionEntry],
+    *,
+    tooltip: str = "Actions",
+    icon: QIcon | None = None,
+) -> QWidget:
+    """Build a consistent, refresh-safe Actions cell for any table."""
+    button = TableActionButton(controller, entries, tooltip=tooltip, icon=icon)
+    host = QWidget()
+    host.setStyleSheet("background:transparent;")
+    layout = QHBoxLayout(host)
+    layout.setContentsMargins(4, 2, 4, 2)
+    layout.setSpacing(0)
+    layout.addWidget(button)
+    layout.addStretch()
+    return host
 
 
 class TableToolbar(QWidget):
@@ -181,19 +279,28 @@ class StandardTableWidget(QTableWidget):
         self._empty_message = "No data"
         self._error_message = "Could not load data"
 
+        self.setObjectName("sshdockTable")
         self.setAlternatingRowColors(True)
+        self.setShowGrid(False)
         self.setWordWrap(False)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.setSortingEnabled(False)
         self.verticalHeader().setVisible(False)
-        self.verticalHeader().setDefaultSectionSize(38)
+        self.verticalHeader().setDefaultSectionSize(40)
+        self.verticalHeader().setMinimumSectionSize(32)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.setIconSize(QSize(16, 16))
+        self.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.setCornerButtonEnabled(False)
 
         header = self.horizontalHeader()
         header.setSectionsMovable(False)
         header.setStretchLastSection(False)
+        header.setHighlightSections(False)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         header.setMinimumSectionSize(40)
         for column in range(self.columnCount()):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
@@ -262,6 +369,7 @@ class StandardTableWidget(QTableWidget):
                     for col in key_columns
                 ))
         scroll = self.verticalScrollBar().value()
+        horizontal_scroll = self.horizontalScrollBar().value()
         old_updates = self.updatesEnabled()
         old_sorting = self.isSortingEnabled()
         old_signals = self.blockSignals(True)
@@ -279,6 +387,9 @@ class StandardTableWidget(QTableWidget):
                         self.selectRow(row)
             self.verticalScrollBar().setValue(
                 min(scroll, self.verticalScrollBar().maximum())
+            )
+            self.horizontalScrollBar().setValue(
+                min(horizontal_scroll, self.horizontalScrollBar().maximum())
             )
         finally:
             self.blockSignals(old_signals)

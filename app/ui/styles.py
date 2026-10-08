@@ -124,9 +124,9 @@ QToolButton#feNav:pressed { background:#121820; }
 QToolButton#feNav:checked { background:#1d6fe8; color:#fff; }
 QLineEdit#fePath,QLineEdit#feSearch { background:#0a0e14; border:1px solid #2a3340; border-radius:6px; padding:4px 8px; color:#e8eef6; min-height:24px; }
 QLineEdit#fePath:focus,QLineEdit#feSearch:focus { border-color:#3b82f6; }
-QTableWidget#feTable { background:#0a0e14; border:1px solid #252c36; border-radius:8px; gridline-color:transparent; outline:0; color:#e8eef6; }
-QTableWidget#feTable::item { padding:2px 6px; }
-QTableWidget#feTable::item:selected { background:#1d6fe8; color:#fff; }
+QTableWidget#feTable { background:#11151a; border:1px solid #252c34; border-radius:9px; gridline-color:#1d232a; outline:0; color:#e9edf2; }
+QTableWidget#feTable::item { padding:7px 6px; }
+QTableWidget#feTable::item:selected { background:#1a385f; color:#e9edf2; }
 QToolButton#feAct { background:transparent; border:none; border-radius:6px; padding:4px 6px; color:#c5d0de; }
 QToolButton#feAct:hover { background:#1c2430; }
 QLabel#feStatus { color:#7a8694; font-size:11px; }
@@ -295,9 +295,9 @@ QToolButton#feNav:pressed { background:#dbe2ea; }
 QToolButton#feNav:checked { background:#2563eb; color:#fff; }
 QLineEdit#fePath,QLineEdit#feSearch { background:#fff; border:1px solid #cbd5e1; border-radius:6px; padding:4px 8px; color:#1e293b; min-height:24px; }
 QLineEdit#fePath:focus,QLineEdit#feSearch:focus { border-color:#3b82f6; }
-QTableWidget#feTable { background:#fff; border:1px solid #d5dbe6; border-radius:8px; gridline-color:transparent; outline:0; color:#1e293b; }
+QTableWidget#feTable { background:#ffffff; border:1px solid #d5dbe6; border-radius:9px; gridline-color:#e2e8f0; outline:0; color:#1e293b; }
 QTableWidget#feTable::item { padding:2px 6px; }
-QTableWidget#feTable::item:selected { background:#2563eb; color:#fff; }
+QTableWidget#feTable::item:selected { background:#dbeafe; color:#0f172a; }
 QToolButton#feAct { background:transparent; border:none; border-radius:6px; padding:4px 6px; color:#475569; }
 QToolButton#feAct:hover { background:#e2e8f0; }
 QLabel#feStatus { color:#64748b; font-size:11px; }
