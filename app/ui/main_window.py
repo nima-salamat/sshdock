@@ -33,7 +33,7 @@ from app.ui.notifications import NotificationBus, ToastHost, NotificationBell
 from app.ui.styles import theme_stylesheet, DARK, LIGHT
 from app.terminal.web_widget import create_terminal_widget, XtermTerminalWidget, HAS_WEBENGINE
 from app.terminal.emulator import TerminalWidget  # fallback / type checks
-from app.terminal.predictor import CommandPredictor, load_remote_history
+from app.terminal.predictor import CommandPredictor, load_remote_history, split_shell_commands
 from app.files.browser import RemoteFileBrowser, ServerFileBackend, ContainerFileBackend
 from app.files.terminal_explorer import TerminalFileExplorer
 from app.ui.docker_results_table import DockerResultsTable
@@ -103,6 +103,9 @@ class MainWindow(QMainWindow):
         self.terminal_status: dict[str, str] = {}
         self.terminal_server_ids: dict[str, str] = {}
         self.terminal_shells: dict[str, str] = {}
+        # One outstanding command per session: the shell reports its exit code
+        # at the next prompt, and that result is correlated with this snapshot.
+        self._terminal_pending_command_results: dict[str, tuple[str, str, str, str]] = {}
         self._command_predictor = CommandPredictor()
         ai_prefs = self.store.load_ui_prefs()
         self._terminal_ai_shadow_enabled = bool(ai_prefs.get("terminal_ai_shadow_enabled", True))
@@ -3874,6 +3877,10 @@ class MainWindow(QMainWindow):
             self.terminal_widgets[session.id] = page
             self.terminal_meta[session.id] = status_label
             session.output.connect(term.feed)
+            if hasattr(session, "command_result"):
+                session.command_result.connect(
+                    lambda exit_code, sid=session.id: self._terminal_command_result(sid, exit_code)
+                )
             session.status.connect(lambda text, sid=session.id: self._set_terminal_status(sid, text))
             # The session can reach CONNECTED before the UI subscribes to its signal.
             # Synchronize the current state explicitly so the UI never remains on
@@ -4104,8 +4111,8 @@ class MainWindow(QMainWindow):
             )
 
     def _terminal_command_submitted(self, command: str, term) -> None:
-        """Learn from explicitly submitted, already-sanitized commands."""
-        if not command or not self.current_id:
+        """Remember a simple submitted command until the shell reports its status."""
+        if not command:
             return
         sid = next(
             (
@@ -4128,16 +4135,36 @@ class MainWindow(QMainWindow):
                 if term is page or term.parentWidget() is page:
                     sid = key
                     break
+
         session = self.terms.get(sid) if sid else None
-        server_id = self.terminal_server_ids.get(
-            sid or "", self.current_id
-        )
-        if session is None:
+        if session is None or not getattr(session, "result_reporting_enabled", False):
             return
+        # Do not let keystrokes sent to a running foreground application replace
+        # the command whose eventual prompt status is still pending.
+        if sid in self._terminal_pending_command_results:
+            return
+        parsed = split_shell_commands(command, limit=2)
+        # Compound commands and shell blocks need execution-aware parsing of their
+        # own; don't attach one prompt status to the wrong fragment.
+        if len(parsed) != 1:
+            return
+
+        server_id = self.terminal_server_ids.get(sid or "", self.current_id or "")
         cwd = getattr(session, "cwd", "/") or "/"
         shell = self.terminal_shells.get(sid or "", "")
+        self._terminal_pending_command_results[sid] = (parsed[0], server_id, cwd, shell)
+
+    def _terminal_command_result(self, sid: str, exit_code: int) -> None:
+        """Learn from a command only after its shell prompt reports the real exit code."""
+        pending = self._terminal_pending_command_results.pop(sid, None)
+        if pending is None:
+            return
+        command, server_id, cwd, shell = pending
         self._command_predictor.add_command(
             command, server_id=server_id, cwd=cwd, shell=shell
+        )
+        self._command_predictor.record_command_result(
+            command, success=int(exit_code) == 0, server_id=server_id
         )
         self._persist_terminal_predictor()
 
@@ -4217,6 +4244,7 @@ class MainWindow(QMainWindow):
                     break
 
     def _terminal_ui_closed(self, sid):
+        self._terminal_pending_command_results.pop(sid, None)
         self.terms.pop(sid, None)
         self.terminal_server_ids.pop(sid, None)
         self.terminal_shells.pop(sid, None)
