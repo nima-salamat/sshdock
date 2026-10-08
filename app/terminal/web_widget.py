@@ -37,11 +37,13 @@ class _Bridge(QObject):
     command_submitted = Signal(str)
     copy_requested = Signal(str)
     scroll_changed = Signal(int, int, int)
+    suggestion_accepted = Signal(str)
 
     def __init__(self):
         super().__init__()
         self.completion_provider = None
         self.suggestions_provider = None
+        self.suggestions_detail_provider = None
 
     @Slot(str, str, str, str, result=str)
     def predict_command(self, prefix: str, cwd: str, shell: str, server_id: str) -> str:
@@ -65,10 +67,40 @@ class _Bridge(QObject):
         except Exception:
             return "[]"
 
+    @Slot(str, str, str, str, result=str)
+    def suggest_command_details(self, prefix: str, cwd: str, shell: str, server_id: str) -> str:
+        """Return rich JSON candidates for the online-learning palette."""
+        provider = self.suggestions_detail_provider or self.suggestions_provider
+        if provider is None:
+            return "[]"
+        try:
+            result = provider(prefix or "", cwd or "/", shell or "", server_id or "")
+            if isinstance(result, (list, tuple)) and result and isinstance(result[0], dict):
+                return json.dumps(list(result)[:5], ensure_ascii=False)
+            return json.dumps(
+                [
+                    {
+                        "command": value,
+                        "confidence": 60.0,
+                        "source": "history",
+                        "reason": "Learned from terminal history",
+                    }
+                    for value in normalize_suggestions(result, limit=5)
+                ],
+                ensure_ascii=False,
+            )
+        except Exception:
+            return "[]"
+
     @Slot(str)
     def report_command(self, command: str) -> None:
         if command:
             self.command_submitted.emit(command)
+
+    @Slot(str)
+    def report_suggestion_accepted(self, command: str) -> None:
+        if command:
+            self.suggestion_accepted.emit(command)
 
     @Slot()
     def request_find(self) -> None:
@@ -138,6 +170,7 @@ class XtermTerminalWidget(QWidget):
         self._bridge.cwd_changed.connect(self._on_cwd_changed)
         self._bridge.magic_command.connect(self._on_magic_command)
         self._bridge.command_submitted.connect(self._on_command_submitted)
+        self._bridge.suggestion_accepted.connect(self._on_suggestion_accepted)
         self._bridge.copy_requested.connect(self._on_copy_requested)
         self._bridge.scroll_changed.connect(self._on_scroll_changed)
 
@@ -278,6 +311,21 @@ class XtermTerminalWidget(QWidget):
         """Set the provider used by the multi-choice completion popup."""
         self._bridge.suggestions_provider = provider
 
+    def set_suggestions_detail_provider(self, provider) -> None:
+        """Set the rich provider used by the AI completion popup."""
+        self._bridge.suggestions_detail_provider = provider
+
+    def set_terminal_ai_settings(self, *, shadow_enabled: bool = True, suggestions_enabled: bool = True) -> None:
+        import json
+        payload = json.dumps({
+            "shadowEnabled": bool(shadow_enabled),
+            "suggestionsEnabled": bool(suggestions_enabled),
+        })
+        self._run_js(
+            "window.sshdockTerm&&window.sshdockTerm.setTerminalAISettings&&"
+            f"window.sshdockTerm.setTerminalAISettings({payload});"
+        )
+
     def set_completion_context(self, *, server_id: str = "", cwd: str = "/", shell: str = "") -> None:
         import json
         payload = json.dumps({
@@ -289,6 +337,18 @@ class XtermTerminalWidget(QWidget):
             "window.sshdockTerm&&window.sshdockTerm.setCompletionContext&&"
             f"window.sshdockTerm.setCompletionContext({payload});"
         )
+
+    def _on_suggestion_accepted(self, command: str) -> None:
+        try:
+            parent = self.parentWidget()
+            while parent is not None:
+                handler = getattr(parent, "_terminal_suggestion_accepted", None)
+                if callable(handler):
+                    handler(command, self)
+                    return
+                parent = parent.parentWidget()
+        except Exception:
+            pass
 
     def _on_command_submitted(self, command: str) -> None:
         """Forward commands observed by xterm without coupling transport to prediction."""
