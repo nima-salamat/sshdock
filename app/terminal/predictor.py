@@ -264,11 +264,18 @@ def split_shell_commands(command: str, *, limit: int = 64) -> list[str]:
         return []
 
     value = re.sub(r"\\\r?\n[ \t]*", "", safe_input)
+
+    quote, trailing_escape, paren_depth, brace_depth = _shell_lexical_state(value)
+    if quote or trailing_escape or paren_depth or brace_depth:
+        return []
     # Here-doc bodies can look like commands; don't learn part of those inputs.
     # Here-strings (<<<) are not here-docs.
     if re.search(r"<<(?!<)", value):
         return []
-
+    # Function definitions and brace-wrapped shell groups are scripts, not leaf
+    # commands. Never learn their inner statements as independent commands.
+    if re.search(r"(?m)(?:^|[;&|]\s*)(?:function\s+[A-Za-z_][\w]*|[A-Za-z_][\w]*\s*\(\s*\)\s*\{)", value):
+        return []
     segments: list[str] = []
     buffer: list[str] = []
     quote: str | None = None
