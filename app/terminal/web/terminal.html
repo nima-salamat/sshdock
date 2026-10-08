@@ -792,6 +792,9 @@
          * submitted command. Learning resumes from the next known prompt line.
          */
         if (value.length > 1 && /[\r\n]/.test(value)) {
+          if (bridge && bridge.report_suggestion_cancelled) {
+            try { bridge.report_suggestion_cancelled(); } catch (e) {}
+          }
           hideGhost();
           hideSuggestions();
           ghostAnchorX = null;
@@ -847,6 +850,9 @@
            local shadow buffer unreliable; fall back safely instead of
            suggesting the wrong command. */
         if (value.indexOf('\x03') >= 0 || value.indexOf('\x04') >= 0) {
+          if (bridge && bridge.report_suggestion_cancelled) {
+            try { bridge.report_suggestion_cancelled(); } catch (e) {}
+          }
           inputModel = '';
           inputModelKnown = value.indexOf('\x04') < 0;
           ghostAnchorX = null;
@@ -862,6 +868,9 @@
         }
 
         if (value.indexOf('\x15') >= 0) {
+          if (bridge && bridge.report_suggestion_cancelled) {
+            try { bridge.report_suggestion_cancelled(); } catch (e) {}
+          }
           inputModel = '';
           inputModelKnown = true;
           ghostAnchorX = null;
