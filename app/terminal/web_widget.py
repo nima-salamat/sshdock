@@ -38,6 +38,7 @@ class _Bridge(QObject):
     copy_requested = Signal(str)
     scroll_changed = Signal(int, int, int)
     suggestion_accepted = Signal(str)
+    suggestion_cancelled = Signal()
 
     def __init__(self):
         super().__init__()
@@ -101,6 +102,10 @@ class _Bridge(QObject):
     def report_suggestion_accepted(self, command: str) -> None:
         if command:
             self.suggestion_accepted.emit(command)
+
+    @Slot()
+    def report_suggestion_cancelled(self) -> None:
+        self.suggestion_cancelled.emit()
 
     @Slot()
     def request_find(self) -> None:
@@ -177,6 +182,7 @@ class XtermTerminalWidget(QWidget):
         self._bridge.magic_command.connect(self._on_magic_command)
         self._bridge.command_submitted.connect(self._on_command_submitted)
         self._bridge.suggestion_accepted.connect(self._on_suggestion_accepted)
+        self._bridge.suggestion_cancelled.connect(self._on_suggestion_cancelled)
         self._bridge.copy_requested.connect(self._on_copy_requested)
         self._bridge.scroll_changed.connect(self._on_scroll_changed)
 
@@ -364,6 +370,18 @@ class XtermTerminalWidget(QWidget):
                 handler = getattr(parent, "_terminal_suggestion_accepted", None)
                 if callable(handler):
                     handler(command, self)
+                    return
+                parent = parent.parentWidget()
+        except Exception:
+            pass
+
+    def _on_suggestion_cancelled(self) -> None:
+        try:
+            parent = self.parentWidget()
+            while parent is not None:
+                handler = getattr(parent, "_terminal_suggestion_cancelled", None)
+                if callable(handler):
+                    handler(self)
                     return
                 parent = parent.parentWidget()
         except Exception:
