@@ -146,6 +146,7 @@ class TerminalSession(QObject):
                 "__sshdock_cwd(){ local __sshdock_status=$?; printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; printf '\\033]777;sshdock-result;%s\\007' \"$__sshdock_status\"; return \"$__sshdock_status\"; }; "
                 "autoload -Uz add-zsh-hook 2>/dev/null; "
                 "add-zsh-hook -d precmd __sshdock_cwd 2>/dev/null; "
+                "add-zsh-hook precmd __sshdock_cwd; "
                 "precmd_functions=(__sshdock_cwd ${precmd_functions:#__sshdock_cwd}); "
                 "__sshdock_cwd; "
                 "case \"${PROMPT:-}\" in ''|*'%n@%m:%~%# ') "
