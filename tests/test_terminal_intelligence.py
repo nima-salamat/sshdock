@@ -258,7 +258,7 @@ def test_open_suggestion_palette_refreshes_when_terminal_context_changes():
     assert prediction.index("if (suggestionsVisible) requestSuggestions(false);") < prediction.index(
         "if (!terminalAI.shadowEnabled)"
     )
-    assert "if (inputModelKnown) requestGhostPrediction();" in html
+    assert "if (inputModelKnown) requestGhostPrediction(true);" in html
 
 def test_live_terminal_cwd_is_pushed_into_prediction_context():
     main = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
@@ -297,4 +297,29 @@ def test_tab_keeps_native_shell_completion_even_with_ai_popup_open():
     assert "hideSuggestions();" in keys[tab_branch:ghost_branch]
     assert "return true;" in keys[tab_branch:ghost_branch]
     assert "sendInput(ghostSuffix);" in keys[ghost_branch:]
+
+def test_terminal_ai_prediction_is_debounced_and_ghost_layout_is_frame_batched():
+    html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    start = html.index("function requestGhostPrediction(")
+    end = html.index("function setInputModel(", start)
+    prediction = html[start:end]
+
+    assert "GHOST_PREDICTION_DEBOUNCE_MS = 70" in html
+    assert "setTimeout(function ()" in prediction
+    assert "cachedMatches" in prediction
+    assert "requestedPrefix !== inputModel" in prediction
+    assert "SUGGESTION_REFRESH_DEBOUNCE_MS = 100" in html
+    assert "ghostPositionFramePending" in html
+    assert "if (!ghostSuffix || !inputModelKnown || ghostPositionFramePending) return;" in html
+
+
+def test_terminal_context_changes_force_a_fresh_prediction():
+    html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    start = html.index("setCompletionContext: function (data)")
+    end = html.index("setTheme: function", start)
+    context_setter = html[start:end]
+
+    assert "completionContext.cwd = String(value.cwd || '/');" in context_setter
+    assert "completionContext.shell = String(value.shell || '');" in context_setter
+    assert "requestGhostPrediction(true)" in context_setter
 
