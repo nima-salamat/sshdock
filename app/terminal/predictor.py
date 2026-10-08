@@ -376,7 +376,12 @@ def split_shell_commands(command: str, *, limit: int = 64) -> list[str]:
     This is deliberately conservative; it is a learning parser, not a shell.
     """
     safe_input = sanitize_command(command)
-    if safe_input is None or _is_sshdock_internal_command(safe_input):
+    if safe_input is None:
+        return []
+    lowered_input = safe_input.casefold()
+    if any(marker in lowered_input for marker in (
+        "__sshdock_", "sshdock-magic", "sshdock-result", ".cache/sshdock/",
+    )):
         return []
 
     value = re.sub(r"\\\r?\n[ \t]*", "", safe_input)
@@ -503,21 +508,21 @@ def split_shell_commands(command: str, *, limit: int = 64) -> list[str]:
     flush()
 
     # If any fragment is shell control syntax, reject the whole input so loops
-    # and conditionals do not teach their body lines as separate commands.
+    # and conditionals do not teach their body lines as independent commands.
     for segment in segments:
         words = CommandPredictor._command_parts(segment)
         if not words:
             continue
         head = words[0].casefold()
         if head in _SHELL_CONTROL_HEADS or head in {"{", "}"} or segment.startswith("("):
-            return []        if _is_sshdock_internal_command(segment, words):
-            # Ignore SSHDock UI commands, but keep unrelated safe commands in a chain.
-            continue
+            return []
 
     commands: list[str] = []
     for segment in segments:
         words = CommandPredictor._command_parts(segment)
         if not words or words[0].startswith("-"):
+            continue
+        if _is_sshdock_internal_command(segment, words):
             continue
         safe = sanitize_command(segment)
         if safe is None:
