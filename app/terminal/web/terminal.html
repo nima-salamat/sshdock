@@ -725,7 +725,12 @@
           hideSuggestions();
           ghostAnchorX = null;
           inputModel = '';
-          inputModelKnown = false;
+          const pasteEndsAtCommandBoundary = /[\\r\\n]$/.test(value);
+          const pasteContainsShellBlock = /(?:^|[\\r\\n;&|]\\s*)(?:if|then|elif|else|fi|for|while|until|select|case|esac|do|done|function)\\b/i.test(value);
+          const pasteContainsHereDoc = /(^|[^<])<<(?!<)/.test(value);
+          inputModelKnown = pasteEndsAtCommandBoundary &&
+            !pasteContainsShellBlock && !pasteContainsHereDoc &&
+            !value.trimEnd().endsWith('\\\\');
           if (bridge && bridge.report_command) {
             try { bridge.report_command(value); } catch (e) {}
           }
