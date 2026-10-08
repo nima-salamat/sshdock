@@ -275,7 +275,7 @@ def test_shell_learning_ignores_comments_and_splits_pasted_commands():
         "# pasted notes\ngit status\ndocker ps; git log --oneline"
     ) == ["git status", "docker ps", "git log --oneline"]
     assert split_shell_commands("echo value#tag") == ["echo value#tag"]
-    assert split_shell_commands("git log \\") == []
+    assert split_shell_commands("git log " + chr(92)) == []
     assert split_shell_commands("function helper() { echo no; }") == []
 
 
@@ -328,6 +328,9 @@ def test_history_parser_filters_comments_and_groups_multiline_shell_entries():
         "if true; then\n"
         "  echo do_not_learn_body\n"
         "fi\n"
+        "cat <<EOF\n"
+        "echo do_not_learn_heredoc\n"
+        "EOF\n"
         "printf 'hello\n"
         "world'\n"
         "pwd\n"
