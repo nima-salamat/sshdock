@@ -764,6 +764,10 @@ class CommandPredictor:
         if not isinstance(state, Mapping):
             return
         self.clear()
+        try:
+            state_version = int(state.get("version", 1))
+        except (TypeError, ValueError):
+            state_version = 1
         raw_history = state.get("history")
         if isinstance(raw_history, Mapping):
             for scope, rows in raw_history.items():
@@ -775,7 +779,13 @@ class CommandPredictor:
                     command = row.get("command")
                     if not isinstance(command, str):
                         continue
-                    cwd = row.get("cwd") if isinstance(row.get("cwd"), str) else "/"
+                    cwd = row.get("cwd") if isinstance(row.get("cwd"), str) else ""
+                    # Version-2 imported shell history was ingested without
+                    # per-command cwd data and falsely defaulted to "/". Drop
+                    # that unreliable location signal instead of training a
+                    # misleading root-directory preference.
+                    if state_version < 3 and cwd == "/":
+                        cwd = ""
                     shell = row.get("shell") if isinstance(row.get("shell"), str) else ""
                     self.add_command(
                         command,
