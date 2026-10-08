@@ -491,14 +491,14 @@ def test_predictor_never_learns_or_scores_sshdock_magic_commands():
 
 def test_remote_history_parser_skips_sshdock_magic_aliases():
     snapshot = parse_history_output(
-        "__SSHDock_SHELL__=/bin/bash\\n"
-        "__BASH__\\n"
-        "mdocker ps\\n"
-        "docker ps --magic\\n"
-        "mdps\\n"
-        "source \"$HOME/.cache/sshdock/docker.sh\"\\n"
-        "git status\\n"
-        "docker ps\\n"
+        "__SSHDock_SHELL__=/bin/bash\n"
+        "__BASH__\n"
+        "mdocker ps\n"
+        "docker ps --magic\n"
+        "mdps\n"
+        "source \"$HOME/.cache/sshdock/docker.sh\"\n"
+        "git status\n"
+        "docker ps\n"
     )
 
     assert snapshot.commands == ("git status", "docker ps")
