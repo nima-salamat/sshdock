@@ -348,11 +348,15 @@ def split_shell_commands(command: str, *, limit: int = 64) -> list[str]:
         return []
     # Here-doc bodies can look like commands; don't learn part of those inputs.
     # Here-strings (<<<) are not here-docs.
-    if re.search(r"<<(?!<)", value):
+    if re.search(r"(?<!<)<<(?!<)", value):
         return []
     # Function definitions and brace-wrapped shell groups are scripts, not leaf
     # commands. Never learn their inner statements as independent commands.
     if re.search(r"(?m)(?:^|[;&|]\s*)(?:function\s+[A-Za-z_][\w]*|[A-Za-z_][\w]*\s*\(\s*\)\s*\{)", value):
+        return []
+
+    # Do not record the left side of an unfinished conditional/pipeline.
+    if re.search(r"(?:&&|\|\||\|)[ \t]*$", value):
         return []
     segments: list[str] = []
     buffer: list[str] = []
