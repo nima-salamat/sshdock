@@ -19,6 +19,9 @@ _OSC7_RE = re.compile(
 _OSC_MAGIC_RE = re.compile(
     rb"\x1b\]777;sshdock-magic;([^\x07\x1b]*)(?:\x07|\x1b\\)"
 )
+_OSC_RESULT_RE = re.compile(
+    rb"\x1b\]777;sshdock-result;([0-9]{1,3})(?:\x07|\x1b\\)"
+)
 
 
 class TerminalSession(QObject):
@@ -27,6 +30,7 @@ class TerminalSession(QObject):
     closed = Signal(str)
     cwd_changed = Signal(str)  # emitted when shell reports a new working directory
     magic_command = Signal(str)  # mdocker / docker --magic
+    command_result = Signal(int)  # shell exit status reported immediately before a prompt
 
     def __init__(self, ssh: SSHServerConnection, title: str, owned_transport: SSHServerConnection | None = None):
         super().__init__()
@@ -41,6 +45,7 @@ class TerminalSession(QObject):
         self._closed_emitted = False
         self._close_lock = asyncio.Lock()
         self.cwd = "/"
+        self.result_reporting_enabled = False
         self._osc_buf = b""  # carry partial OSC sequences across reads
         self._reconnect_task: asyncio.Task | None = None
         self._reconnect_lock = asyncio.Lock()
@@ -104,11 +109,12 @@ class TerminalSession(QObject):
             shell_name = (getattr(shell_probe, "stdout", "") or "").strip().lower()
         except Exception:
             shell_name = ""
+        self.result_reporting_enabled = shell_name in {"bash", "zsh", "fish"}
 
         if shell_name == "bash":
             setup = (
                 "export TERM=\"xterm-256color\" COLORTERM=\"truecolor\" CLICOLOR=1; "
-                "__sshdock_cwd(){ printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; }; "
+                "__sshdock_cwd(){ local __sshdock_status=$?; printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; printf '\\033]777;sshdock-result;%s\\007' \"$__sshdock_status\"; return \"$__sshdock_status\"; }; "
                 "if declare -p PROMPT_COMMAND 2>/dev/null | grep -q 'declare -a'; then "
                 "case \";${PROMPT_COMMAND[*]};\" in *\";__sshdock_cwd;\"*) ;; *) "
                 "PROMPT_COMMAND=(\"__sshdock_cwd\" \"${PROMPT_COMMAND[@]}\");; esac; "
@@ -137,10 +143,10 @@ class TerminalSession(QObject):
             setup = (
                 "export TERM=\"xterm-256color\" COLORTERM=\"truecolor\" CLICOLOR=1; "
                 "command -v dircolors >/dev/null 2>&1 && eval \"$(dircolors -b 2>/dev/null)\"; "
-                "__sshdock_cwd(){ printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; }; "
+                "__sshdock_cwd(){ local __sshdock_status=$?; printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; printf '\\033]777;sshdock-result;%s\\007' \"$__sshdock_status\"; return \"$__sshdock_status\"; }; "
                 "autoload -Uz add-zsh-hook 2>/dev/null; "
                 "add-zsh-hook -d precmd __sshdock_cwd 2>/dev/null; "
-                "add-zsh-hook precmd __sshdock_cwd; "
+                "precmd_functions=(__sshdock_cwd ${precmd_functions:#__sshdock_cwd}); "
                 "__sshdock_cwd; "
                 "case \"${PROMPT:-}\" in ''|*'%n@%m:%~%# ') "
                 "PROMPT='%F{green}%n%f%F{242}@%f%F{cyan}%m%f%F{242}:%f%F{blue}%~%f %F{yellow}%#%f '; "
@@ -160,7 +166,8 @@ class TerminalSession(QObject):
                 "functions -q la; or function la; command ls -A --color=auto $argv; end; "
                 "functions -q grep; or function grep; command grep --color=auto $argv; end; "
                 "functions -q __sshdock_cwd; or function __sshdock_cwd --on-event fish_prompt; "
-                "printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; end; "
+                "set -l __sshdock_status $status; printf '\\033]7;file://sshdock%s\\007' \"$PWD\"; "
+                "printf '\\033]777;sshdock-result;%s\\007' \"$__sshdock_status\"; return $__sshdock_status; end; "
                 "__sshdock_cwd; "
 
             )
@@ -221,13 +228,29 @@ class TerminalSession(QObject):
             if path and path != self.cwd:
                 self.cwd = path
                 self.cwd_changed.emit(path)
+
+        # Read status markers before stripping them from the PTY stream.
+        # They are emitted by the shell's prompt hook, after the command exits.
+        for match in _OSC_RESULT_RE.finditer(blob):
+            try:
+                exit_code = int(match.group(1))
+            except (TypeError, ValueError):
+                continue
+            if 0 <= exit_code <= 255:
+                self.command_result.emit(exit_code)
+
         cleaned = blob
-        if "_OSC_MAGIC_RE" in globals() or True:
-            for match in reversed(list(_OSC_MAGIC_RE.finditer(blob))):
+        special_matches = sorted(
+            [*_OSC_MAGIC_RE.finditer(blob), *_OSC_RESULT_RE.finditer(blob)],
+            key=lambda match: match.start(),
+            reverse=True,
+        )
+        for match in special_matches:
+            if match.re is _OSC_MAGIC_RE:
                 payload = match.group(1).decode("utf-8", "replace").strip()
                 if payload:
                     self.magic_command.emit(payload)
-                cleaned = cleaned[: match.start()] + cleaned[match.end() :]
+            cleaned = cleaned[: match.start()] + cleaned[match.end() :]
         return cleaned
 
     @staticmethod
