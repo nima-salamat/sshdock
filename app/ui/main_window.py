@@ -1468,6 +1468,56 @@ class MainWindow(QMainWindow):
         font_hint.setWordWrap(True)
         ap.addWidget(font_hint)
 
+        ai_title = QLabel("Terminal intelligence")
+        ai_title.setObjectName("sectionTitle")
+        ap.addWidget(ai_title)
+        ai_hint = QLabel(
+            "Local online-learning assistance. It learns from this terminal's command "
+            "history and from suggestions you explicitly accept; secret-like entries "
+            "are filtered before learning."
+        )
+        ai_hint.setObjectName("muted")
+        ai_hint.setWordWrap(True)
+        ap.addWidget(ai_hint)
+
+        self.terminal_ai_shadow_cb = QCheckBox("Show AI command shadow while typing")
+        self.terminal_ai_shadow_cb.setChecked(
+            bool(prefs.get("terminal_ai_shadow_enabled", True))
+        )
+        ap.addWidget(self.terminal_ai_shadow_cb)
+
+        self.terminal_ai_suggestions_cb = QCheckBox(
+            "Enable Ctrl+Space AI suggestion palette"
+        )
+        self.terminal_ai_suggestions_cb.setChecked(
+            bool(prefs.get("terminal_ai_suggestions_enabled", True))
+        )
+        ap.addWidget(self.terminal_ai_suggestions_cb)
+
+        self.terminal_ai_history_cb = QCheckBox(
+            "Learn from remote shell history when connecting"
+        )
+        self.terminal_ai_history_cb.setChecked(
+            bool(prefs.get("terminal_ai_learn_history", True))
+        )
+        ap.addWidget(self.terminal_ai_history_cb)
+
+        self.terminal_ai_persist_cb = QCheckBox(
+            "Persist learned command patterns on this machine"
+        )
+        self.terminal_ai_persist_cb.setChecked(
+            bool(prefs.get("terminal_ai_persist_learning", True))
+        )
+        ap.addWidget(self.terminal_ai_persist_cb)
+
+        reset_ai_btn = QPushButton("Reset learned terminal model")
+        reset_ai_btn.setObjectName("ghostBtnDanger")
+        reset_ai_btn.setToolTip(
+            "Forget learned command patterns and accepted-suggestion signals."
+        )
+        reset_ai_btn.clicked.connect(self._reset_terminal_learning)
+        ap.addWidget(reset_ai_btn, 0, Qt.AlignmentFlag.AlignLeft)
+
         self.notify_cb = QCheckBox("Enable notification bell for Docker / SSH events")
         self.notify_cb.setChecked(bool(prefs.get("notifications_enabled", True)))
         ap.addWidget(self.notify_cb)
@@ -2087,6 +2137,29 @@ class MainWindow(QMainWindow):
         except Exception:
             log.debug("Could not refresh theme icons", exc_info=True)
 
+        self._terminal_ai_shadow_enabled = bool(
+            prefs.get("terminal_ai_shadow_enabled", True)
+        )
+        self._terminal_ai_suggestions_enabled = bool(
+            prefs.get("terminal_ai_suggestions_enabled", True)
+        )
+        self._terminal_ai_learn_history = bool(
+            prefs.get("terminal_ai_learn_history", True)
+        )
+        self._terminal_ai_persist_learning = bool(
+            prefs.get("terminal_ai_persist_learning", True)
+        )
+        for page in getattr(self, "terminal_widgets", {}).values():
+            if HAS_WEBENGINE:
+                for widget in page.findChildren(XtermTerminalWidget):
+                    try:
+                        widget.set_terminal_ai_settings(
+                            shadow_enabled=self._terminal_ai_shadow_enabled,
+                            suggestions_enabled=self._terminal_ai_suggestions_enabled,
+                        )
+                    except Exception:
+                        pass
+
         family = str(prefs.get("terminal_font_family") or "Consolas")
         size = int(prefs.get("terminal_font_size") or 13)
         font = QFont(family, size)
@@ -2126,6 +2199,23 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
+    def _reset_terminal_learning(self) -> None:
+        reply = QMessageBox.question(
+            self,
+            "Reset terminal model",
+            "Forget learned terminal history, accepted suggestions and online-learning weights?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self._command_predictor.clear()
+        try:
+            self.store.clear_terminal_learning_state()
+        except Exception:
+            pass
+        self.statusBar().showMessage("Terminal AI learning model reset.", 3500)
+
     def _ui_icon_color(self, role: str = "normal", theme: str | None = None) -> str:
         name = str(theme or self.store.load_ui_prefs().get("theme") or "dark").lower()
         if role == "danger":
@@ -2150,7 +2240,18 @@ class MainWindow(QMainWindow):
         proxy_settings = self.proxy_settings.config()
         prefs["remote_agent_enabled"] = agent_enabled
         prefs["proxy"] = proxy_settings.to_dict()
+        prefs["terminal_ai_shadow_enabled"] = self.terminal_ai_shadow_cb.isChecked()
+        prefs["terminal_ai_suggestions_enabled"] = self.terminal_ai_suggestions_cb.isChecked()
+        prefs["terminal_ai_learn_history"] = self.terminal_ai_history_cb.isChecked()
+        prefs["terminal_ai_persist_learning"] = self.terminal_ai_persist_cb.isChecked()
+        prefs["terminal_ai_max_suggestions"] = 5
+        self._terminal_ai_shadow_enabled = prefs["terminal_ai_shadow_enabled"]
+        self._terminal_ai_suggestions_enabled = prefs["terminal_ai_suggestions_enabled"]
+        self._terminal_ai_learn_history = prefs["terminal_ai_learn_history"]
+        self._terminal_ai_persist_learning = prefs["terminal_ai_persist_learning"]
         self.store.save_ui_prefs(prefs)
+        if self._terminal_ai_persist_learning:
+            self._persist_terminal_predictor()
         # Apply the scheduler limit synchronously so page loaders immediately
         # use the new value; resize the persistent shell pool asynchronously.
         self.manager.set_worker_shell_count_limit(worker_count)
