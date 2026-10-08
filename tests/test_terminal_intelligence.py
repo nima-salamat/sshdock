@@ -274,7 +274,7 @@ def test_multiline_paste_is_forwarded_to_shell_aware_learner():
     end = html.index("/* Printable insertion is only unambiguous", start)
     paste_path = html[start:end]
 
-    assert "value.length > 1 && /[\\\\r\\\\n]/.test(value)" in paste_path
+    assert "value.length > 1 && /[\r\n]/.test(value)" in paste_path
     assert "bridge.report_command(value)" in paste_path
     assert "inputModelKnown = false" in paste_path
 
