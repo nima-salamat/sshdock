@@ -129,6 +129,33 @@ class CommandPredictor:
         "failure": -1.75,
     }
 
+    # Safe, read-only or low-risk starter commands keep the first terminal useful
+    # while remote shell history is still being fetched. Learned commands always
+    # outrank these bootstrap candidates.
+    STARTER_COMMANDS = (
+        "ls -la",
+        "pwd",
+        "cd ..",
+        "whoami",
+        "date",
+        "df -h",
+        "free -h",
+        "ps aux",
+        "docker ps",
+        "docker images",
+        "docker compose ps",
+        "git status",
+        "git log --oneline -5",
+        "systemctl --failed",
+        "journalctl -n 100 --no-pager",
+        "ip addr",
+        "ss -tulpn",
+        "du -sh .",
+        "cat /etc/os-release",
+        "uname -a",
+        "history",
+    )
+
     def __init__(self, *, max_commands: int = 1200) -> None:
         self.max_commands = max(50, int(max_commands))
         self._history: dict[str, deque[CommandObservation]] = defaultdict(
@@ -371,15 +398,20 @@ class CommandPredictor:
     ) -> list[PredictionCandidate]:
         scope = self._scope(server_id)
         counts = self._counts[scope]
-        if not counts:
-            return []
-
         raw = prefix or ""
         empty_prefix = not raw.strip()
+
+        # Do not make suggestions depend on an async history read completing.
+        # History-backed candidates retain their learned features; starter
+        # candidates only contribute prefix/context fit and never get recorded
+        # as commands the user actually ran.
+        candidates = dict.fromkeys((*counts.keys(), *self.STARTER_COMMANDS))
         scored: list[tuple[float, str, dict[str, float]]] = []
 
-        for command in counts:
+        for command in candidates:
             candidate = normalize_prediction(command)
+            if not candidate:
+                continue
             if not empty_prefix and not candidate.casefold().startswith(raw.casefold()):
                 continue
             if len(candidate) <= len(raw):
@@ -399,7 +431,13 @@ class CommandPredictor:
             if key in seen:
                 continue
             seen.add(key)
-            source, reason = self._reason(features)
+            if candidate in self.STARTER_COMMANDS and candidate not in counts:
+                source, reason = (
+                    "starter",
+                    "Safe starter suggestion while terminal history loads",
+                )
+            else:
+                source, reason = self._reason(features)
             selected.append(
                 PredictionCandidate(
                     command=candidate,
@@ -554,7 +592,7 @@ class CommandPredictor:
         limit: int = 1,
         min_score: float = 3.0,
     ) -> str | list[str] | None:
-        """Suggest the best command(s) starting with the current editable prefix."""
+        """Suggest commands from learned history, with starter fallback on first use."""
         raw = prefix or ""
         empty_prefix = not raw.strip()
         if empty_prefix and limit == 1:
@@ -562,9 +600,6 @@ class CommandPredictor:
 
         scope = self._scope(server_id)
         counts = self._counts[scope]
-        if not counts:
-            return [] if limit != 1 else None
-
         current_parts = self._prefix_parts(raw)
         previous = self._history[scope][-1].command if self._history[scope] else None
         cwd_norm = cwd or "/"
@@ -579,25 +614,33 @@ class CommandPredictor:
             if shell_norm and (obs.shell or "").split("/")[-1].lower() == shell_norm
         )
 
-        candidates: list[tuple[float, str]] = []
+        candidates = dict.fromkeys((*counts.keys(), *self.STARTER_COMMANDS))
+        candidates_scored: list[tuple[float, str]] = []
         raw_cf = raw.casefold()
 
-        for command, count in counts.items():
+        for command in candidates:
             candidate = normalize_prediction(command)
+            if not candidate:
+                continue
             if not empty_prefix and not candidate.casefold().startswith(raw_cf):
                 continue
             if len(candidate) <= len(raw):
                 continue
 
-            score = 10.0
-            score += min(7.0, math.log2(count + 1) * 1.8)
+            count = counts.get(candidate, 0)
+            # Learned commands keep the established scoring scale. Unseen
+            # starter commands start lower, so server history wins when present.
+            score = 10.0 if count else 3.0
+            if count:
+                score += min(7.0, math.log2(count + 1) * 1.8)
 
-            last = self._last_seen[scope].get(command, 0)
-            age = max(0, self._clock - last)
-            score += 4.0 * math.exp(-age / 80.0)
+                last = self._last_seen[scope].get(candidate, 0)
+                if last:
+                    age = max(0, self._clock - last)
+                    score += 4.0 * math.exp(-age / 80.0)
 
             if previous:
-                transition_count = self._transitions[scope].get((previous, command), 0)
+                transition_count = self._transitions[scope].get((previous, candidate), 0)
                 score += min(8.0, math.log2(transition_count + 1) * 2.5)
 
             if current_parts:
@@ -608,20 +651,20 @@ class CommandPredictor:
                 if candidate_parts and candidate_parts[: len(current_parts)] == list(current_parts):
                     score += 3.0
 
-            cwd_hits = cwd_counts.get(command, 0)
+            cwd_hits = cwd_counts.get(candidate, 0)
             if cwd_hits:
                 score += min(5.0, 2.0 + math.log2(cwd_hits + 1))
 
-            shell_hits = shell_counts.get(command, 0)
+            shell_hits = shell_counts.get(candidate, 0)
             if shell_hits:
                 score += min(3.0, 1.0 + math.log2(shell_hits + 1))
 
-            candidates.append((score, candidate))
+            candidates_scored.append((score, candidate))
 
-        candidates.sort(key=lambda item: (-item[0], item[1].casefold(), item[1]))
+        candidates_scored.sort(key=lambda item: (-item[0], item[1].casefold(), item[1]))
         selected: list[str] = []
         seen: set[str] = set()
-        for score, candidate in candidates:
+        for score, candidate in candidates_scored:
             if score < min_score:
                 continue
             key = candidate.casefold()
