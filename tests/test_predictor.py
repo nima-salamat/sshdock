@@ -171,3 +171,80 @@ def test_predictor_has_starter_suggestions_before_remote_history_load():
     # Bootstrap commands must not become falsely learned user history.
     assert predictor.history(server_id="fresh-server") == ()
 
+def test_directory_predictions_exclude_current_directory_targets():
+    predictor = CommandPredictor()
+    predictor.ingest(
+        [
+            "cd /srv/app",
+            "cd .",
+            "cd ../app",
+            "cd ..",
+            "ls -la",
+            "git status",
+        ],
+        server_id="srv",
+        cwd="/srv/app",
+        shell="/bin/bash",
+    )
+
+    ranked = predictor.suggest_ranked(
+        "cd", server_id="srv", cwd="/srv/app", shell="bash", limit=5
+    )
+    commands = [item.command for item in ranked]
+
+    assert "cd .." in commands
+    assert "cd /srv/app" not in commands
+    assert "cd ." not in commands
+    assert "cd ../app" not in commands
+
+
+def test_directory_noop_filter_handles_root_and_pwd_aliases():
+    predictor = CommandPredictor()
+    predictor.ingest(
+        ["cd ..", "cd $PWD", "cd ${PWD}", "cd /"],
+        server_id="root-server",
+        cwd="/",
+    )
+
+    ranked = predictor.suggest_ranked(
+        "cd", server_id="root-server", cwd="/", limit=5
+    )
+    assert [item.command for item in ranked] == []
+
+
+def test_prediction_generalizes_context_across_sibling_directories():
+    predictor = CommandPredictor()
+    predictor.ingest(
+        ["git status", "docker ps", "git log", "docker images", "git diff"],
+        server_id="project",
+        cwd="/srv/app/api",
+        shell="/bin/bash",
+    )
+
+    ranked = predictor.suggest_ranked(
+        "docker",
+        server_id="project",
+        cwd="/srv/app/web",
+        shell="bash",
+        limit=5,
+    )
+    by_command = {item.command: item for item in ranked}
+
+    assert by_command["docker ps"].features["cwd_path"] >= 0.6
+    assert by_command["docker ps"].features["family_transition"] == 1.0
+
+
+def test_imported_history_does_not_falsely_claim_every_command_ran_in_root():
+    predictor = CommandPredictor()
+    snapshot = parse_history_output(
+        "__SSHDock_SHELL__=/bin/bash\n"
+        "__BASH__\n"
+        "cd ../api\n"
+        "git status\n"
+    )
+    predictor.ingest_snapshot(snapshot, server_id="srv")
+
+    observations = predictor._history[predictor._scope("srv")]
+    assert observations
+    assert all(observation.cwd == "" for observation in observations)
+
