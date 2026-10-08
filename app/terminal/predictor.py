@@ -72,6 +72,162 @@ def sanitize_command(command: str) -> str | None:
     return value
 
 
+_SHELL_CONTROL_HEADS = {
+    "if", "then", "elif", "else", "fi", "for", "while", "until",
+    "select", "case", "esac", "do", "done", "function",
+}
+
+
+def split_shell_commands(command: str, *, limit: int = 64) -> list[str]:
+    """Extract learnable leaf commands without training comments or shell syntax.
+
+    Comments are ignored outside quotes, explicit backslash continuations and
+    quoted multiline arguments stay together, and top-level separators split
+    independent commands. Control blocks and here-docs are rejected as a whole.
+    This is deliberately conservative; it is a learning parser, not a shell.
+    """
+    safe_input = sanitize_command(command)
+    if safe_input is None:
+        return []
+
+    value = re.sub(r"\\\r?\n[ \t]*", " ", safe_input)
+    # Here-doc bodies can look like commands; don't learn part of those inputs.
+    # Here-strings (<<<) are not here-docs.
+    if re.search(r"<<(?!<)", value):
+        return []
+
+    segments: list[str] = []
+    buffer: list[str] = []
+    quote: str | None = None
+    escaped = False
+    comment = False
+    paren_depth = 0
+    brace_depth = 0
+    index = 0
+
+    def flush() -> None:
+        candidate = "".join(buffer).strip()
+        buffer.clear()
+        if candidate:
+            segments.append(candidate)
+
+    while index < len(value):
+        char = value[index]
+        next_char = value[index + 1] if index + 1 < len(value) else ""
+
+        if comment:
+            if char in "\r\n":
+                comment = False
+                flush()
+            index += 1
+            continue
+
+        if quote:
+            buffer.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\" and quote != "'":
+                escaped = True
+            elif char == quote:
+                quote = None
+            index += 1
+            continue
+
+        if char == "#" and (not buffer or buffer[-1].isspace()):
+            comment = True
+            index += 1
+            continue
+
+        if char in {"'", '"'} or char == chr(96):
+            quote = char
+            buffer.append(char)
+            index += 1
+            continue
+
+        if char == "\\":
+            # Preserve escaped characters so shlex sees the original spelling.
+            buffer.append(char)
+            if next_char:
+                buffer.append(next_char)
+                index += 2
+            else:
+                index += 1
+            continue
+
+        if char == "(":
+            paren_depth += 1
+            buffer.append(char)
+            index += 1
+            continue
+        if char == ")" and paren_depth:
+            paren_depth -= 1
+            buffer.append(char)
+            index += 1
+            continue
+        if char == "{":
+            brace_depth += 1
+            buffer.append(char)
+            index += 1
+            continue
+        if char == "}" and brace_depth:
+            brace_depth -= 1
+            buffer.append(char)
+            index += 1
+            continue
+
+        if paren_depth == 0 and brace_depth == 0:
+            if char in "\r\n;":
+                flush()
+                index += 1
+                continue
+            if char == "&" and next_char == "&":
+                flush()
+                index += 2
+                continue
+            if char == "|" and next_char == "|":
+                flush()
+                index += 2
+                continue
+            # Async separator; preserve redirections such as 2>&1 and &>file.
+            if char == "&" and next_char != ">" and (not buffer or buffer[-1] != ">"):
+                flush()
+                index += 1
+                continue
+
+        buffer.append(char)
+        index += 1
+
+    # Half-entered quotes/subshells have no reliable command boundary yet.
+    if quote or escaped or paren_depth or brace_depth:
+        return []
+    flush()
+
+    # If any fragment is shell control syntax, reject the whole input so loops
+    # and conditionals do not teach their body lines as separate commands.
+    for segment in segments:
+        words = CommandPredictor._command_parts(segment)
+        if not words:
+            continue
+        head = words[0].casefold()
+        if head in _SHELL_CONTROL_HEADS or head in {"{", "}"} or segment.startswith("("):
+            return []
+
+    commands: list[str] = []
+    for segment in segments:
+        words = CommandPredictor._command_parts(segment)
+        if not words or words[0].startswith("-"):
+            continue
+        safe = sanitize_command(segment)
+        if safe is None:
+            continue
+        normalized = normalize_prediction(safe)
+        if normalized:
+            commands.append(normalized)
+            if len(commands) >= max(1, min(64, int(limit))):
+                break
+    return commands
+
+
 @dataclass(frozen=True, slots=True)
 class PredictionContext:
     server_id: str = ""
@@ -191,30 +347,42 @@ class CommandPredictor:
         cwd: str = "/",
         shell: str = "",
     ) -> bool:
-        safe = sanitize_command(command)
-        if safe is None:
+        commands = split_shell_commands(command)
+        if not commands:
             return False
-        canonical = normalize_prediction(safe)
 
         scope = self._scope(server_id)
-        obs = CommandObservation(canonical, self._normalize_cwd(cwd) if cwd else "", shell or "")
+        current_cwd = self._normalize_cwd(cwd) if cwd else ""
+        added = False
         history = self._history[scope]
-        previous = history[-1].command if history else None
 
-        if len(history) == history.maxlen:
-            old = history[0]
-            self._counts[scope][old.command] -= 1
-            if self._counts[scope][old.command] <= 0:
-                del self._counts[scope][old.command]
+        for safe in commands:
+            canonical = normalize_prediction(safe)
+            obs = CommandObservation(canonical, current_cwd, shell or "")
+            previous = history[-1].command if history else None
 
-        history.append(obs)
-        self._counts[scope][canonical] += 1
-        self._clock += 1
-        self._last_seen[scope][canonical] = self._clock
+            if len(history) == history.maxlen:
+                old = history[0]
+                self._counts[scope][old.command] -= 1
+                if self._counts[scope][old.command] <= 0:
+                    del self._counts[scope][old.command]
 
-        if previous and previous != canonical:
-            self._transitions[scope][(previous, canonical)] += 1
-        return True
+            history.append(obs)
+            self._counts[scope][canonical] += 1
+            self._clock += 1
+            self._last_seen[scope][canonical] = self._clock
+
+            if previous and previous != canonical:
+                self._transitions[scope][(previous, canonical)] += 1
+            added = True
+
+            # For explicit chains such as "cd app && git status", use the new
+            # directory for later segments whenever the destination is known.
+            target = self._directory_target(canonical, current_cwd)
+            if target:
+                current_cwd = target
+
+        return added
 
     def ingest(
         self,
