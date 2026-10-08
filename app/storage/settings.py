@@ -17,6 +17,11 @@ _DEFAULT_UI: dict[str, Any] = {
     "notifications_enabled": True,
     "worker_shell_count": 3,
     "remote_agent_enabled": False,
+    "terminal_ai_shadow_enabled": True,
+    "terminal_ai_suggestions_enabled": True,
+    "terminal_ai_learn_history": True,
+    "terminal_ai_persist_learning": True,
+    "terminal_ai_max_suggestions": 5,
     "proxy": ProxySettings().to_dict(),
 }
 
@@ -28,6 +33,7 @@ class SettingsStore:
         self.path = self.root / "profiles.json"
         self.compose_path = self.root / "compose_projects.json"
         self.ui_path = self.root / "ui_prefs.json"
+        self.terminal_learning_path = self.root / "terminal_learning.json"
 
     # ── profiles ──────────────────────────────────────────────
     def load_profiles(self) -> list[SSHProfile]:
@@ -112,6 +118,30 @@ class SettingsStore:
         prefs["proxy"] = settings.to_dict()
         self.save_ui_prefs(prefs)
 
+    def load_terminal_learning_state(self) -> dict[str, Any]:
+        if not self.terminal_learning_path.exists():
+            return {}
+        try:
+            data = json.loads(self.terminal_learning_path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def save_terminal_learning_state(self, state: dict[str, Any]) -> None:
+        payload = state if isinstance(state, dict) else {}
+        tmp = self.terminal_learning_path.with_suffix(".tmp")
+        tmp.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        tmp.replace(self.terminal_learning_path)
+
+    def clear_terminal_learning_state(self) -> None:
+        try:
+            self.terminal_learning_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
     def save_ui_prefs(self, prefs: dict[str, Any]) -> None:
         merged = dict(_DEFAULT_UI)
         merged.update(prefs)
@@ -127,6 +157,7 @@ class SettingsStore:
             "profiles": [p.to_dict() for p in self.load_profiles()],
             "compose_projects": self.load_compose_projects(),
             "ui_prefs": self.load_ui_prefs(),
+            "terminal_learning": self.load_terminal_learning_state(),
         }
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -164,6 +195,9 @@ class SettingsStore:
         ui = data.get("ui_prefs")
         if isinstance(ui, dict):
             self.save_ui_prefs(ui)
+        learning = data.get("terminal_learning")
+        if isinstance(learning, dict):
+            self.save_terminal_learning_state(learning)
         return counts
 
     @staticmethod
