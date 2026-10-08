@@ -382,3 +382,59 @@ def test_predictor_reuses_context_between_prefixes_and_invalidates_when_history_
     assert refreshed is not first
     assert refreshed["observations"][-1].command == "git diff"
 
+def test_snapshot_ingestion_can_be_batched_and_reserved_against_duplicates():
+    predictor = CommandPredictor()
+    snapshot = parse_history_output(
+        "__SSHDock_SHELL__=/bin/bash\n"
+        "__BASH__\n"
+        "git status\n"
+        "docker ps\n"
+    )
+
+    prepared = predictor.prepare_snapshot_ingest(snapshot, server_id="batch")
+    assert prepared is not None
+    commands, fingerprint = prepared
+    assert commands == ("git status", "docker ps")
+    # A second terminal opening must not import the same snapshot concurrently.
+    assert predictor.prepare_snapshot_ingest(snapshot, server_id="batch") is None
+    assert predictor.history(server_id="batch") == ()
+
+    predictor.ingest(commands[:1], server_id="batch", cwd="", shell=snapshot.shell)
+    predictor.ingest(commands[1:], server_id="batch", cwd="", shell=snapshot.shell)
+    predictor.finish_snapshot_ingest(fingerprint, server_id="batch", completed=True)
+
+    assert predictor.history(server_id="batch") == ("git status", "docker ps")
+    assert predictor.prepare_snapshot_ingest(snapshot, server_id="batch") is None
+
+
+def test_remote_history_parsing_runs_outside_calling_thread(monkeypatch):
+    import asyncio
+    import threading
+    from types import SimpleNamespace
+    import app.terminal.predictor as predictor_module
+
+    caller_thread = threading.get_ident()
+    parser_threads = []
+    original_parser = predictor_module.parse_history_output
+
+    def tracking_parser(output):
+        parser_threads.append(threading.get_ident())
+        return original_parser(output)
+
+    class FakeSSH:
+        async def run_fast(self, _script, timeout):
+            return SimpleNamespace(
+                exit_code=0,
+                stdout=(
+                    "__SSHDock_SHELL__=/bin/bash\n"
+                    "__BASH__\n"
+                    "git status\n"
+                ),
+            )
+
+    monkeypatch.setattr(predictor_module, "parse_history_output", tracking_parser)
+    snapshot = asyncio.run(predictor_module.load_remote_history(FakeSSH()))
+
+    assert snapshot.commands == ("git status",)
+    assert parser_threads and parser_threads[0] != caller_thread
+
