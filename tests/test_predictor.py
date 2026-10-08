@@ -196,6 +196,8 @@ def test_directory_predictions_exclude_current_directory_targets():
     assert "cd /srv/app" not in commands
     assert "cd ." not in commands
     assert "cd ../app" not in commands
+    shadow = predictor.suggest("cd", server_id="srv", cwd="/srv/app", shell="bash")
+    assert shadow == "cd .."
 
 
 def test_directory_noop_filter_handles_root_and_pwd_aliases():
@@ -247,4 +249,20 @@ def test_imported_history_does_not_falsely_claim_every_command_ran_in_root():
     observations = predictor._history[predictor._scope("srv")]
     assert observations
     assert all(observation.cwd == "" for observation in observations)
+
+def test_legacy_persisted_history_drops_unreliable_root_default():
+    predictor = CommandPredictor()
+    predictor.load_state_dict({
+        "version": 2,
+        "history": {
+            "srv": [
+                {"command": "git status", "cwd": "/", "shell": "/bin/bash"},
+                {"command": "cd ../app", "cwd": "/srv", "shell": "/bin/bash"},
+            ]
+        },
+    })
+
+    observations = predictor._history[predictor._scope("srv")]
+    assert observations[0].cwd == ""
+    assert observations[1].cwd == "/srv"
 
