@@ -160,6 +160,12 @@ class XtermTerminalWidget(QWidget):
         self._pending_writes: list[str] = []
         self._last_size: tuple[int, int] | None = None
         self._pending_font: tuple[str, int] | None = None
+        self._pending_ai_settings: tuple[bool, bool] = (True, True)
+        self._pending_completion_context: dict[str, str] = {
+            "serverId": "",
+            "cwd": "/",
+            "shell": "",
+        }
         self._theme_name = "light" if str(theme).lower() == "light" else "dark"
         self._bg = _BG_LIGHT if self._theme_name == "light" else _BG_DARK
         self._bridge = _Bridge()
@@ -316,10 +322,17 @@ class XtermTerminalWidget(QWidget):
         self._bridge.suggestions_detail_provider = provider
 
     def set_terminal_ai_settings(self, *, shadow_enabled: bool = True, suggestions_enabled: bool = True) -> None:
+        self._pending_ai_settings = (bool(shadow_enabled), bool(suggestions_enabled))
+        self._push_ai_settings_to_js()
+
+    def _push_ai_settings_to_js(self) -> None:
+        if not self._ready:
+            return
         import json
+        shadow_enabled, suggestions_enabled = self._pending_ai_settings
         payload = json.dumps({
-            "shadowEnabled": bool(shadow_enabled),
-            "suggestionsEnabled": bool(suggestions_enabled),
+            "shadowEnabled": shadow_enabled,
+            "suggestionsEnabled": suggestions_enabled,
         })
         self._run_js(
             "window.sshdockTerm&&window.sshdockTerm.setTerminalAISettings&&"
@@ -327,12 +340,18 @@ class XtermTerminalWidget(QWidget):
         )
 
     def set_completion_context(self, *, server_id: str = "", cwd: str = "/", shell: str = "") -> None:
-        import json
-        payload = json.dumps({
+        self._pending_completion_context = {
             "serverId": str(server_id or ""),
             "cwd": str(cwd or "/"),
             "shell": str(shell or ""),
-        })
+        }
+        if not self._ready:
+            return
+        self._push_completion_context_to_js()
+
+    def _push_completion_context_to_js(self) -> None:
+        import json
+        payload = json.dumps(self._pending_completion_context)
         self._run_js(
             "window.sshdockTerm&&window.sshdockTerm.setCompletionContext&&"
             f"window.sshdockTerm.setCompletionContext({payload});"
@@ -478,9 +497,11 @@ class XtermTerminalWidget(QWidget):
         self._load_placeholder.hide()
         self._paint_chrome(self._bg)
         self._flush_pending()
-        # Apply any font/theme queued before JS was ready
+        # Apply queued terminal context, AI settings, and font/theme.
         self.apply_theme(getattr(self, "_theme_name", "dark"))
         self._push_font_to_js()
+        self._push_completion_context_to_js()
+        self._push_ai_settings_to_js()
         self._run_js("window.sshdockTerm && window.sshdockTerm.fit && window.sshdockTerm.fit();")
 
     def _request_find(self) -> None:
