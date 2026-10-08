@@ -181,7 +181,7 @@ def test_suggestion_list_is_deduplicated_and_bounded():
     from app.terminal.predictor import normalize_suggestions
 
     result = normalize_suggestions(
-        ["git status", "git log", "git diff", "git pull", "git push", "git branch", "GIT STATUS"],
+        ["git status", "git log", "GIT STATUS", "git diff", "git pull", "git push", "git branch"],
         limit=5,
     )
 

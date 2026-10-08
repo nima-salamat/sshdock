@@ -192,6 +192,15 @@ class CommandPredictor:
         cwd_norm = cwd or "/"
         shell_norm = (shell or "").split("/")[-1].lower()
 
+        observations = tuple(self._history[scope])
+        cwd_counts = Counter(
+            obs.command for obs in observations if (obs.cwd or "/") == cwd_norm
+        )
+        shell_counts = Counter(
+            obs.command for obs in observations
+            if shell_norm and (obs.shell or "").split("/")[-1].lower() == shell_norm
+        )
+
         candidates: list[tuple[float, str]] = []
         raw_cf = raw.casefold()
 
@@ -221,19 +230,11 @@ class CommandPredictor:
                 if candidate_parts and candidate_parts[: len(current_parts)] == list(current_parts):
                     score += 3.0
 
-            observations = self._history[scope]
-            cwd_hits = sum(
-                1 for obs in observations
-                if obs.command == command and (obs.cwd or "/") == cwd_norm
-            )
+            cwd_hits = cwd_counts.get(command, 0)
             if cwd_hits:
                 score += min(5.0, 2.0 + math.log2(cwd_hits + 1))
 
-            shell_hits = sum(
-                1 for obs in observations
-                if obs.command == command
-                and (obs.shell or "").split("/")[-1].lower() == shell_norm
-            ) if shell_norm else 0
+            shell_hits = shell_counts.get(command, 0)
             if shell_hits:
                 score += min(3.0, 1.0 + math.log2(shell_hits + 1))
 

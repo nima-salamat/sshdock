@@ -463,6 +463,17 @@
           else hideSuggestions();
           return;
         }
+        if (forceOpen) {
+          suggestionsVisible = true;
+          suggestionPopup.classList.add('visible');
+          suggestionPopup.style.display = 'block';
+          suggestionPopup.textContent = '';
+          const loading = document.createElement('div');
+          loading.className = 'suggestion-empty';
+          loading.textContent = 'Loading command suggestions…';
+          suggestionPopup.appendChild(loading);
+          positionSuggestions();
+        }
         const seq = ++suggestionRequestSeq;
         try {
           bridge.suggest_commands(
