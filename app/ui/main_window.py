@@ -3974,9 +3974,11 @@ class MainWindow(QMainWindow):
                 state = self._command_predictor.state_dict()
                 await asyncio.to_thread(self.store.save_terminal_learning_state, state)
         except asyncio.CancelledError:
-            self._terminal_predictor_persist_dirty = True
+            # Do not respawn a persistence task while the application is shutting down.
+            self._terminal_predictor_persist_dirty = False
             raise
         except Exception:
+            self._terminal_predictor_persist_dirty = False
             log.debug("Could not persist terminal AI learning state", exc_info=True)
         finally:
             self._terminal_predictor_persist_active = False
