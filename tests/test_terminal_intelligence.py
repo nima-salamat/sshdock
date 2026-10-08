@@ -257,3 +257,14 @@ def test_open_suggestion_palette_refreshes_when_terminal_context_changes():
     )
     assert "if (inputModelKnown) requestGhostPrediction();" in html
 
+def test_live_terminal_cwd_is_pushed_into_prediction_context():
+    main = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
+    start = main.index("def _terminal_cwd_changed(")
+    end = main.index("def _set_terminal_status(", start)
+    handler = main[start:end]
+
+    assert "term.set_completion_context(" in handler
+    assert "cwd=normalized" in handler
+    assert "shell=self.terminal_shells.get(sid, \"\")" in handler
+    assert handler.index("term.set_completion_context(") < handler.index("if sid != current:")
+
