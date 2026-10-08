@@ -103,9 +103,10 @@ def test_terminal_session_preserves_color_capable_shell_environment():
     assert '"COLORTERM": "truecolor"' in client
     assert '"CLICOLOR": "1"' in client
 
-def test_terminal_html_allows_ghost_acceptance_with_tab_or_arrow_right():
+def test_terminal_html_uses_arrow_right_only_for_inline_ai_acceptance():
     src = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
-    assert "(ev.key === 'Tab' || ev.key === 'ArrowRight')" in src
+    assert "ev.key === 'ArrowRight' && ghostSuffix && inputModelKnown" in src
+    assert "(ev.key === 'Tab' || ev.key === 'ArrowRight')" not in src
     assert "sendInput(ghostSuffix)" in src
     assert "ghostSuffix && inputModelKnown" in src
 
@@ -197,7 +198,9 @@ def test_terminal_popup_is_keyboard_operable_and_uses_predictor():
     assert "bridge.suggest_commands" in html
     assert "ev.code === 'Space'" in html
     assert "suggestionsVisible && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')" in html
-    assert "suggestionsVisible && (ev.key === 'Enter' || ev.key === 'Tab')" in html
+    assert "suggestionsVisible && ev.key === 'Enter'" in html
+    assert "suggestionsVisible && ev.key === 'Tab'" in html
+    assert "hideSuggestions();" in html
     assert "function acceptSuggestion(index)" in html
     assert "def set_suggestions_provider" in widget
     assert "def _predict_terminal_commands" in main
@@ -279,4 +282,19 @@ def test_multiline_paste_is_forwarded_to_shell_aware_learner():
     assert "inputModelKnown = pasteEndsAtCommandBoundary &&" in paste_path
     assert "pasteContainsShellBlock" in paste_path
     assert "pasteContainsHereDoc" in paste_path
+
+def test_tab_keeps_native_shell_completion_even_with_ai_popup_open():
+    html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    start = html.index("term.attachCustomKeyEventHandler(function (ev)")
+    end = html.index("window.sshdockTerm = {", start)
+    keys = html[start:end]
+
+    tab_branch = keys.index("suggestionsVisible && ev.key === 'Tab'")
+    enter_branch = keys.index("suggestionsVisible && ev.key === 'Enter'")
+    ghost_branch = keys.index("ev.key === 'ArrowRight' && ghostSuffix")
+    assert tab_branch < ghost_branch
+    assert enter_branch < tab_branch
+    assert "hideSuggestions();" in keys[tab_branch:ghost_branch]
+    assert "return true;" in keys[tab_branch:ghost_branch]
+    assert "sendInput(ghostSuffix);" in keys[ghost_branch:]
 
