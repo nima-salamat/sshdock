@@ -354,7 +354,7 @@ def test_terminal_session_reports_and_strips_shell_exit_status():
     session.command_result.connect(results.append)
 
     visible = session._extract_cwd(
-        b"command output\\x1b]777;sshdock-result;7\\x07prompt"
+        b"command output\x1b]777;sshdock-result;7\x07prompt"
     )
 
     assert visible == b"command outputprompt"
@@ -368,8 +368,8 @@ def test_terminal_session_handles_split_exit_status_marker():
     results = []
     session.command_result.connect(results.append)
 
-    first = session._extract_cwd(b"output\\x1b]777;sshdock-result;1")
-    second = session._extract_cwd(b"\\x07prompt")
+    first = session._extract_cwd(b"output\x1b]777;sshdock-result;1")
+    second = session._extract_cwd(b"\x07prompt")
 
     assert first == b"output"
     assert second == b"prompt"
