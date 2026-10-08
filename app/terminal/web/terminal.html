@@ -720,7 +720,7 @@
          * The inline prompt model cannot track those lines safely, but Python's
          * shell-aware learner can split simple commands and ignore comments.
          */
-        if (value.length > 1 && /[\\r\\n]/.test(value)) {
+        if (value.length > 1 && /[\r\n]/.test(value)) {
           hideGhost();
           hideSuggestions();
           ghostAnchorX = null;
