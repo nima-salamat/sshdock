@@ -105,7 +105,8 @@ class MainWindow(QMainWindow):
         self.terminal_shells: dict[str, str] = {}
         # One outstanding command per session: the shell reports its exit code
         # at the next prompt, and that result is correlated with this snapshot.
-        self._terminal_pending_command_results: dict[str, tuple[str, str, str, str]] = {}
+        self._terminal_pending_command_results: dict[str, tuple[str, str, str, str, bool]] = {}
+        self._terminal_selected_suggestions: dict[str, str] = {}
         self._command_predictor = CommandPredictor()
         ai_prefs = self.store.load_ui_prefs()
         self._terminal_ai_shadow_enabled = bool(ai_prefs.get("terminal_ai_shadow_enabled", True))
@@ -4141,6 +4142,7 @@ class MainWindow(QMainWindow):
             return
         # Do not let keystrokes sent to a running foreground application replace
         # the command whose eventual prompt status is still pending.
+        selected_suggestion = self._terminal_selected_suggestions.pop(sid, None)
         if sid in self._terminal_pending_command_results:
             return
         parsed = split_shell_commands(command, limit=2)
@@ -4152,17 +4154,27 @@ class MainWindow(QMainWindow):
         server_id = self.terminal_server_ids.get(sid or "", self.current_id or "")
         cwd = getattr(session, "cwd", "/") or "/"
         shell = self.terminal_shells.get(sid or "", "")
-        self._terminal_pending_command_results[sid] = (parsed[0], server_id, cwd, shell)
+        selected_parts = split_shell_commands(selected_suggestion or "", limit=2)
+        selected_was_submitted = (
+            len(selected_parts) == 1 and selected_parts[0] == parsed[0]
+        )
+        self._terminal_pending_command_results[sid] = (
+            parsed[0], server_id, cwd, shell, selected_was_submitted
+        )
 
     def _terminal_command_result(self, sid: str, exit_code: int) -> None:
         """Learn from a command only after its shell prompt reports the real exit code."""
         pending = self._terminal_pending_command_results.pop(sid, None)
         if pending is None:
             return
-        command, server_id, cwd, shell = pending
+        command, server_id, cwd, shell, was_suggested = pending
         self._command_predictor.add_command(
             command, server_id=server_id, cwd=cwd, shell=shell
         )
+        if was_suggested:
+            self._command_predictor.record_suggestion_acceptance(
+                command, server_id=server_id, cwd=cwd, shell=shell
+            )
         self._command_predictor.record_command_result(
             command, success=int(exit_code) == 0, server_id=server_id
         )
@@ -4188,18 +4200,35 @@ class MainWindow(QMainWindow):
                 except Exception:
                     continue
         session = self.terms.get(sid) if sid else None
-        server_id = self.terminal_server_ids.get(
-            sid or "", self.current_id or ""
-        )
-        if session is None:
+        if session is None or sid is None:
             return
-        self._command_predictor.record_suggestion_acceptance(
-            command,
-            server_id=server_id,
-            cwd=getattr(session, "cwd", "/") or "/",
-            shell=self.terminal_shells.get(sid or "", ""),
+        parsed = split_shell_commands(command, limit=2)
+        if len(parsed) != 1:
+            return
+        # Selection is only staged here. The acceptance signal affects model
+        # weights only after this exact command is submitted and the shell
+        # returns its exit status; Ctrl+C before Enter therefore has no effect.
+        self._terminal_selected_suggestions[sid] = parsed[0]
+
+    def _terminal_suggestion_cancelled(self, term) -> None:
+        """Discard an inserted suggestion when the input line is cancelled."""
+        sid = next(
+            (
+                key for key, widget in self.terminal_widgets.items()
+                if widget is term.parentWidget()
+            ),
+            None,
         )
-        self._persist_terminal_predictor()
+        if sid is None:
+            for key, page in self.terminal_widgets.items():
+                try:
+                    if term is page or term.isAncestorOf(page):
+                        sid = key
+                        break
+                except Exception:
+                    continue
+        if sid is not None:
+            self._terminal_selected_suggestions.pop(sid, None)
 
     def _terminal_cwd_changed(self, sid: str, path: str):
         """Update the session, live prediction context, and visible explorer."""
@@ -4245,6 +4274,7 @@ class MainWindow(QMainWindow):
 
     def _terminal_ui_closed(self, sid):
         self._terminal_pending_command_results.pop(sid, None)
+        self._terminal_selected_suggestions.pop(sid, None)
         self.terms.pop(sid, None)
         self.terminal_server_ids.pop(sid, None)
         self.terminal_shells.pop(sid, None)
