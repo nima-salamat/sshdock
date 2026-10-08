@@ -197,7 +197,7 @@ class CommandPredictor:
         canonical = normalize_prediction(safe)
 
         scope = self._scope(server_id)
-        obs = CommandObservation(canonical, cwd or "/", shell or "")
+        obs = CommandObservation(canonical, self._normalize_cwd(cwd) if cwd else "", shell or "")
         history = self._history[scope]
         previous = history[-1].command if history else None
 
@@ -249,9 +249,13 @@ class CommandPredictor:
         if fingerprint in fingerprints:
             return 0
         fingerprints.append(fingerprint)
+        # Shell history files do not carry a reliable cwd for every line.
+        # Keep that context unknown rather than falsely attributing all history
+        # to "/" and training misleading directory affinities.
         return self.ingest(
             commands,
             server_id=server_id,
+            cwd="",
             shell=snapshot.shell,
         )
 
@@ -776,7 +780,7 @@ class CommandPredictor:
                     self.add_command(
                         command,
                         server_id=str(scope),
-                        cwd=cwd or "/",
+                        cwd=cwd,
                         shell=shell,
                     )
 
