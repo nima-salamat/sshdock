@@ -164,61 +164,38 @@ class TerminalSession(QObject):
             )
         else:
             setup = ""
-        echo_disabled = False
         try:
-            # First switch echo off in isolation; otherwise the PTY can echo the
-            # remainder of the installation payload before stty takes effect.
-            await asyncio.wait_for(
-                self.channel.write(b"stty -echo 2>/dev/null\r"),
-                timeout=2.0,
-            )
-            echo_disabled = True
-            await asyncio.sleep(0.04)
-
             from app.terminal.docker_pretty import install_command
 
-            parts = []
+            parts = [
+                # ECHO is disabled at PTY allocation time, so this clears the
+                # one startup prompt instead of leaving a duplicate prompt.
+                "printf '\\r\\033[2K'",
+            ]
             if setup:
                 parts.append(setup)
             parts.append(install_command(shell_name=shell_name, manage_echo=False))
-            parts.append("printf '\\033[2J\\033[H'")
-            # Each component may already end with a shell command separator.
-            # Normalize only the boundary so we never generate an empty command
-            # between two separators in the final PTY payload.
+            if shell_name == "bash":
+                # The complete bootstrap is one Bash history event. Remove it
+                # before restoring normal terminal echo behavior.
+                parts.append("history -d $HISTCMD 2>/dev/null || true")
+            parts.append("stty echo 2>/dev/null")
+            parts.append("printf '\\r\\033[K'")
+
             parts = [part.strip().rstrip(";") for part in parts if part.strip()]
             payload = "; ".join(parts) + "\r"
-
             await asyncio.wait_for(
                 self.channel.write(payload.encode("utf-8")),
-                timeout=6.0,
+                timeout=8.0,
             )
-            # Sending the restore command separately keeps the echo invariant
-            # independent of shell error handling or a partial bootstrap payload.
             await asyncio.sleep(0.05)
-            await asyncio.wait_for(
-                self.channel.write(b"stty echo 2>/dev/null; printf '\\r\\033[K'\r"),
-                timeout=2.0,
-            )
-            await asyncio.sleep(0.03)
-            echo_disabled = False
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            if echo_disabled and self.channel and not self.channel.closed:
+            if self.channel and not self.channel.closed:
                 try:
                     await asyncio.wait_for(
-                        self.channel.write(
-                            b"stty echo 2>/dev/null; printf '\\033[2J\\033[H'\r"
-                        ),
-                        timeout=2.0,
-                    )
-                except Exception:
-                    pass
-        finally:
-            if echo_disabled and self.channel and not self.channel.closed:
-                try:
-                    await asyncio.wait_for(
-                        self.channel.write(
-                            b"stty echo 2>/dev/null; printf '\\033[2J\\033[H'\r"
-                        ),
+                        self.channel.write(b"stty echo 2>/dev/null\r"),
                         timeout=2.0,
                     )
                 except Exception:

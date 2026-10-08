@@ -12,6 +12,8 @@ from typing import Any, Awaitable, Callable
 import asyncssh
 from asyncssh.pbe import KeyEncryptionError
 
+from PySide6.QtCore import QObject, Signal
+
 from app.core.models import ConnectionState, SSHProfile, ConnectionErrorInfo
 from app.core.runtime import create_task
 from app.ssh.discovery import ssh_config_candidates
@@ -297,8 +299,13 @@ class _ShellWorker:
         raise RuntimeError("Persistent SSH worker failed")
 
 
-class SSHServerConnection:
+class SSHServerConnection(QObject):
+    """SSH connection with explicit unexpected-disconnect observation."""
+
+    connection_lost = Signal()
+
     def __init__(self, profile, credentials, auth=None, worker_shell_count: int = 3, remote_agent_enabled: bool = False):
+        super().__init__()
         self.profile = profile
         self.credentials = credentials
         self.auth = auth or AuthMaterial()
@@ -322,6 +329,47 @@ class SSHServerConnection:
         self._process_lock = asyncio.Lock()
         self._remote_agent_enabled = bool(remote_agent_enabled)
         self._remote_agent: RemoteAgentClient | None = None
+        self._connection_watch_task: asyncio.Task | None = None
+
+    def _start_connection_watch(self) -> None:
+        """Watch the established transport for an unplanned close."""
+        task = self._connection_watch_task
+        if task is not None and not task.done():
+            task.cancel()
+        connection = self.connection
+        if connection is not None:
+            self._connection_watch_task = create_task(
+                self._watch_connection(connection),
+                name=f"ssh-connection-watch-{self.profile.id[:8]}",
+                owner="ssh-connection",
+            )
+
+    async def _watch_connection(self, connection) -> None:
+        try:
+            await connection.wait_closed()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.debug(
+                "SSH connection watcher ended unexpectedly for %s",
+                self.profile.name,
+                exc_info=True,
+            )
+        finally:
+            current = asyncio.current_task()
+            if self._connection_watch_task is current:
+                self._connection_watch_task = None
+
+        if self._close_requested or self.connection is not connection:
+            return
+
+        self.connection = None
+        self.state = ConnectionState.DISCONNECTED
+        await self._close_remote_agent()
+        await self._close_workers()
+        await self.close_processes()
+        log.warning("SSH connection lost unexpectedly for %s", self.profile.name)
+        self.connection_lost.emit()
 
     @property
     def is_connected(self):
@@ -577,6 +625,7 @@ class SSHServerConnection:
                     timeout=self.profile.connect_timeout + 2,
                 )
                 self.state = ConnectionState.CONNECTED
+                self._start_connection_watch()
                 if with_command_transport and self._remote_agent_enabled:
                     try:
                         await self._start_remote_agent()
@@ -587,6 +636,10 @@ class SSHServerConnection:
                 if with_worker_pool:
                     await self._start_worker_pool()
             except Exception as exc:
+                watch = self._connection_watch_task
+                self._connection_watch_task = None
+                if watch is not None and not watch.done():
+                    watch.cancel()
                 if self.connection:
                     self.connection.close()
                     self.connection = None
@@ -612,6 +665,9 @@ class SSHServerConnection:
             env=_terminal_env(env),
             term_type="xterm-256color",
             term_size=(cols, rows),
+            # Disable input echo at PTY allocation time so bootstrap commands
+            # never appear in the interactive terminal.
+            term_modes={asyncssh.PTY_ECHO: 0},
             encoding="utf-8",
             errors="replace",
         )
@@ -802,6 +858,14 @@ class SSHServerConnection:
 
     async def close(self):
         self._close_requested = True
+        watch = self._connection_watch_task
+        self._connection_watch_task = None
+        if watch is not None and watch is not asyncio.current_task() and not watch.done():
+            watch.cancel()
+            try:
+                await asyncio.wait_for(watch, timeout=0.5)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
         await self._close_remote_agent()
         for ch in tuple(self.channels):
             await self.close_channel(ch)

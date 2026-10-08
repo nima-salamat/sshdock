@@ -72,12 +72,15 @@ def test_virtual_tables_follow_xterm_alternate_screen():
 
 
 
-def test_terminal_bootstrap_disables_echo_before_payload():
-    src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
-    assert 'self.channel.write(b"stty -echo 2>/dev/null\\r")' in src
-    assert "install_command(shell_name=shell_name, manage_echo=False)" in src
-    assert "stty echo 2>/dev/null" in src
-    assert "033[K" in src
+def test_terminal_bootstrap_uses_non_echoing_pty_and_cleans_bash_history():
+    client = (ROOT / "app/ssh/client.py").read_text(encoding="utf-8")
+    session = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
+    assert "term_modes={asyncssh.PTY_ECHO: 0}" in client
+    assert "printf '\\r\\033[2K'" in session
+    assert "history -d $HISTCMD" in session
+    assert "install_command(shell_name=shell_name, manage_echo=False)" in session
+    assert "stty echo 2>/dev/null" in session
+    assert 'stty -echo 2>/dev/null\\r' not in session
 
 def test_terminal_magic_supports_native_docker_magic_form_for_posix_shells():
     docker = (ROOT / "app/terminal/docker_pretty.py").read_text(encoding="utf-8")
@@ -472,3 +475,23 @@ def test_bash_prompt_setup_is_syntactically_valid():
     assert "\\033[1;32m" in probe.stdout
     assert "\\033[1;36m" in probe.stdout
     assert "\\033[1;33m" in probe.stdout
+
+
+def test_ssh_connection_watches_unplanned_disconnects():
+    src = (ROOT / "app/ssh/client.py").read_text(encoding="utf-8")
+    assert "class SSHServerConnection(QObject)" in src
+    assert "connection_lost = Signal()" in src
+    assert "async def _watch_connection" in src
+    assert "await connection.wait_closed()" in src
+    assert "self.connection_lost.emit()" in src
+    assert "self._start_connection_watch()" in src
+
+
+def test_session_manager_auto_reconnects_unplanned_disconnects():
+    src = (ROOT / "app/ssh/session_manager.py").read_text(encoding="utf-8")
+    assert "ssh.connection_lost.connect" in src
+    assert "def _handle_connection_lost" in src
+    assert "async def _auto_reconnect" in src
+    assert "managed.profile.auto_reconnect" in src
+    assert "managed.profile.max_retries" in src
+    assert "reconnect_task.cancel()" in src

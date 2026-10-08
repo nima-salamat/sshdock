@@ -39,6 +39,7 @@ class SessionManager(QObject):
             return self.servers[profile.id]
         ssh = SSHServerConnection(profile, self.credentials, auth, worker_shell_count=self.worker_shell_count, remote_agent_enabled=self.remote_agent_enabled)
         managed = ManagedServer(profile, ssh)
+        ssh.connection_lost.connect(lambda pid=profile.id: self._handle_connection_lost(pid))
         self.servers[profile.id] = managed
         self.server_added.emit(profile.id, profile.name)
         return managed
@@ -80,6 +81,62 @@ class SessionManager(QObject):
             self.state_changed.emit(pid, managed.ssh.state.value)
             raise
         self.state_changed.emit(pid, ConnectionState.CONNECTED.value)
+
+    def _handle_connection_lost(self, pid: str) -> None:
+        """Start one automatic reconnect loop after an unexpected transport loss."""
+        managed = self.servers.get(pid)
+        if managed is None:
+            return
+        self.state_changed.emit(pid, ConnectionState.DISCONNECTED.value)
+        if not managed.profile.auto_reconnect:
+            return
+        current = managed.reconnect_task
+        if current is not None and not current.done():
+            return
+        managed.reconnect_task = asyncio.create_task(
+            self._auto_reconnect(pid),
+            name=f"ssh-auto-reconnect-{pid[:8]}",
+        )
+
+    async def _auto_reconnect(self, pid: str) -> None:
+        managed = self.servers.get(pid)
+        if managed is None:
+            return
+        delay = max(0.2, float(managed.profile.retry_delay or 0.2))
+        retries = max(1, int(managed.profile.max_retries or 1))
+        try:
+            for attempt in range(1, retries + 1):
+                managed = self.servers.get(pid)
+                if managed is None:
+                    return
+                if managed.ssh.is_connected:
+                    self.state_changed.emit(pid, ConnectionState.CONNECTED.value)
+                    return
+                self.state_changed.emit(pid, ConnectionState.RECONNECTING.value)
+                try:
+                    await managed.ssh.connect()
+                    self.state_changed.emit(pid, ConnectionState.CONNECTED.value)
+                    return
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    if attempt >= retries:
+                        self.state_changed.emit(pid, managed.ssh.state.value)
+                        return
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "Auto-reconnect attempt %s/%s failed for %s: %s",
+                        attempt,
+                        retries,
+                        managed.profile.name,
+                        exc,
+                    )
+                    await asyncio.sleep(delay)
+                    delay = min(delay * 2.0, 30.0)
+        finally:
+            managed = self.servers.get(pid)
+            if managed is not None and managed.reconnect_task is asyncio.current_task():
+                managed.reconnect_task = None
 
     async def open_terminal(self, pid: str, title: str | None = None):
         managed = self.servers[pid]
@@ -124,6 +181,14 @@ class SessionManager(QObject):
         managed = self.servers.get(pid)
         if not managed:
             return
+        reconnect_task = managed.reconnect_task
+        managed.reconnect_task = None
+        if reconnect_task is not None and reconnect_task is not asyncio.current_task() and not reconnect_task.done():
+            reconnect_task.cancel()
+            try:
+                await asyncio.wait_for(reconnect_task, timeout=0.5)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
         terminals = tuple(managed.terminals.values())
         if terminals:
             await asyncio.gather(*(terminal.close() for terminal in terminals), return_exceptions=True)
