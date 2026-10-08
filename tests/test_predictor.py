@@ -281,6 +281,7 @@ def test_shell_learning_ignores_comments_and_splits_pasted_commands():
     assert split_shell_commands("cat <<< 'inline input'") == [
         "cat <<< 'inline input'"
     ]
+    assert split_shell_commands("echo '<<EOF'") == ["echo '<<EOF'"]
     assert split_shell_commands("function helper() { echo no; }") == []
 
 
