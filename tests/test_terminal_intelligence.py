@@ -45,7 +45,8 @@ def test_terminal_html_preserves_whitespace_in_ghost_display():
     assert "normalizeGhostCandidate" in src
     assert "renderGhostSuffix" in src
     assert "ghost-gap" in src
-    assert "ghostSuffix = value.slice(inputModel.length)" in src
+    assert "ghostSuffix = ghostCandidate.slice(prefix.length)" in src
+    assert "ghostSuffix = value.slice(requestedPrefix.length)" in src
 
 
 def test_predictor_repairs_missing_shell_separator_for_cd_path_predictions():
@@ -304,7 +305,7 @@ def test_terminal_ai_prediction_is_debounced_and_ghost_layout_is_frame_batched()
     end = html.index("function setInputModel(", start)
     prediction = html[start:end]
 
-    assert "GHOST_PREDICTION_DEBOUNCE_MS = 70" in html
+    assert "GHOST_PREDICTION_DEBOUNCE_MS = 90" in html
     assert "setTimeout(function ()" in prediction
     assert "cachedMatches" in prediction
     assert "requestedPrefix !== inputModel" in prediction
