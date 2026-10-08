@@ -118,6 +118,8 @@ class MainWindow(QMainWindow):
             log.debug("Could not restore terminal AI learning state", exc_info=True)
         self._tasks: set[asyncio.Task] = set()
         self.task_manager = TaskManager()
+        self._terminal_predictor_persist_dirty = False
+        self._terminal_predictor_persist_active = False
         self._page_refresh_task = None
         self._server_ui_states: dict[str, str] = {}
         self._shutdown_task: asyncio.Task | None = None
@@ -3942,14 +3944,44 @@ class MainWindow(QMainWindow):
             log.exception("Terminal creation failed")
 
     def _persist_terminal_predictor(self) -> None:
+        """Schedule coalesced persistence so JSON serialization and disk I/O do not stall Qt."""
         if not self._terminal_ai_persist_learning:
             return
+        self._terminal_predictor_persist_dirty = True
+        if self._terminal_predictor_persist_active:
+            return
+
+        self._terminal_predictor_persist_active = True
+        task = self._spawn(
+            self._flush_terminal_predictor_persistence(),
+            name="Terminal predictor persistence",
+        )
+        if task is None:
+            self._terminal_predictor_persist_active = False
+            # Preserve state if the event loop is unavailable during shutdown.
+            try:
+                self.store.save_terminal_learning_state(
+                    self._command_predictor.state_dict()
+                )
+            except Exception:
+                log.debug("Could not persist terminal AI learning state", exc_info=True)
+
+    async def _flush_terminal_predictor_persistence(self) -> None:
+        """Write a stable snapshot off-thread; fold concurrent save requests into one."""
         try:
-            self.store.save_terminal_learning_state(
-                self._command_predictor.state_dict()
-            )
+            while self._terminal_predictor_persist_dirty and self._terminal_ai_persist_learning:
+                self._terminal_predictor_persist_dirty = False
+                state = self._command_predictor.state_dict()
+                await asyncio.to_thread(self.store.save_terminal_learning_state, state)
+        except asyncio.CancelledError:
+            self._terminal_predictor_persist_dirty = True
+            raise
         except Exception:
             log.debug("Could not persist terminal AI learning state", exc_info=True)
+        finally:
+            self._terminal_predictor_persist_active = False
+            if self._terminal_predictor_persist_dirty and self._terminal_ai_persist_learning:
+                self._persist_terminal_predictor()
 
     def _predict_terminal_command(
         self, prefix: str, cwd: str, shell: str, server_id: str
@@ -4022,10 +4054,34 @@ class MainWindow(QMainWindow):
         try:
             snapshot = await load_remote_history(ssh)
             if self._terminal_ai_learn_history and snapshot.commands:
-                self._command_predictor.ingest_snapshot(
+                prepared = self._command_predictor.prepare_snapshot_ingest(
                     snapshot, server_id=server_id
                 )
-                self._persist_terminal_predictor()
+                if prepared is not None:
+                    commands, fingerprint = prepared
+                    completed = False
+                    try:
+                        # Let Qt paint and process input between small history
+                        # batches instead of ingesting up to 1,200 rows in one
+                        # uninterrupted qasync callback.
+                        batch_size = 32
+                        for offset in range(0, len(commands), batch_size):
+                            self._command_predictor.ingest(
+                                commands[offset : offset + batch_size],
+                                server_id=server_id,
+                                cwd="",
+                                shell=snapshot.shell,
+                            )
+                            await asyncio.sleep(0.005)
+                        completed = True
+                    finally:
+                        self._command_predictor.finish_snapshot_ingest(
+                            fingerprint,
+                            server_id=server_id,
+                            completed=completed,
+                        )
+                    if completed:
+                        self._persist_terminal_predictor()
             self.terminal_shells[sid] = snapshot.shell
             if hasattr(term, "set_completion_context"):
                 session = self.terms.get(sid)
