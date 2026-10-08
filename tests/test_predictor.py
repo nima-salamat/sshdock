@@ -303,7 +303,7 @@ def test_add_command_learns_simple_children_not_comments_or_fragments():
 
     assert not predictor.add_command("# comment only", server_id="paste")
     assert predictor.add_command(
-        "# notes\\ngit status; docker ps && git log \\\n --oneline",
+        "# notes\ngit status; docker ps && git log \\\n --oneline",
         server_id="paste",
         cwd="/srv/app",
     )
