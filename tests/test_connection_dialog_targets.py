@@ -22,3 +22,10 @@ def test_connection_dialog_has_direct_target_fallback() -> None:
 
 def test_connection_dialog_clears_unresolvable_alias_before_profile_creation() -> None:
     assert 'self.alias.setCurrentText("")' in DIALOGS_SRC
+
+
+def test_connection_dialog_uses_shared_proxy_settings() -> None:
+    assert "ProxySettingsWidget" in DIALOGS_SRC
+    assert "self.proxy_settings.validation_error()" in DIALOGS_SRC
+    assert "proxy=self.proxy_settings.config()" in DIALOGS_SRC
+    assert "self.store.load_proxy_settings()" in DIALOGS_SRC

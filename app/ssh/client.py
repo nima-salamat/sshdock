@@ -18,6 +18,7 @@ from app.core.models import ConnectionState, SSHProfile, ConnectionErrorInfo
 from app.core.runtime import create_task
 from app.ssh.discovery import ssh_config_candidates
 from app.ssh.errors import classify_exception
+from app.ssh.proxy import build_proxy_command, resolve_proxy_target
 from app.storage.secure import CredentialStore
 from app.remote.agent import RemoteAgentClient
 
@@ -456,7 +457,7 @@ class SSHServerConnection(QObject):
         def factory():
             return SSHClientProtocol(validate)
 
-        return {
+        kwargs = {
             "username": self.profile.username or None,
             "port": self.profile.port,
             "password": self._cred("password"),
@@ -470,6 +471,20 @@ class SSHServerConnection(QObject):
             "agent_path": os.environ.get("SSH_AUTH_SOCK") or None,
             "config": [str(p) for p in ssh_config_candidates()] if self.profile.alias else None,
         }
+
+        # Explicit SSHDock proxy configuration takes precedence over a saved
+        # SSH ProxyCommand. AsyncSSH then speaks SSH over the local byte bridge.
+        if self.profile.proxy.enabled:
+            target_host, target_port = resolve_proxy_target(self.profile)
+            kwargs["proxy_command"] = build_proxy_command(
+                self.profile.proxy,
+                target_host=target_host,
+                target_port=target_port,
+            )
+        elif self.profile.proxy_command:
+            kwargs["proxy_command"] = self.profile.proxy_command
+
+        return kwargs
 
     async def _start_worker_pool(self) -> None:
         if not self.is_connected:

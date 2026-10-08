@@ -40,7 +40,7 @@ from app.ui.docker_results_table import DockerResultsTable
 from app.ui.dialogs import ErrorDialog, ConfirmRemoveDialog
 from app.files.highlighter import CodeHighlighter
 from app.ui.container_details import ContainerDetailsWindow
-from app.ui.widgets import NavButton, MetricCard, icon_button, AutoRefreshControl, TableAutoRefresh
+from app.ui.widgets import NavButton, MetricCard, icon_button, AutoRefreshControl, TableAutoRefresh, ProxySettingsWidget
 from app.ui.widgets.table import StandardTableWidget, TableActionMenuController, create_table_actions_cell
 from app.ui.resource_monitor import ResourceMonitorDialog
 from app.workers.task_manager import TaskManager
@@ -1488,6 +1488,21 @@ class MainWindow(QMainWindow):
         agent_hint.setWordWrap(True)
         ap.addWidget(agent_hint)
 
+        proxy_panel = QFrame()
+        proxy_panel.setObjectName("proxyPanel")
+        pp = QVBoxLayout(proxy_panel)
+        pp.setContentsMargins(0, 4, 0, 0)
+        pp.setSpacing(6)
+        proxy_title = QLabel("SSH Proxy")
+        proxy_title.setObjectName("sectionTitle")
+        pp.addWidget(proxy_title)
+        self.proxy_settings = ProxySettingsWidget(
+            enabled_label="Enable proxy for SSH connections by default"
+        )
+        self.proxy_settings.set_config(self.store.load_proxy_settings())
+        pp.addWidget(self.proxy_settings)
+        ap.addWidget(proxy_panel)
+
         apply_btn = QPushButton("Apply appearance & SSH")
         apply_btn.setProperty("accent", True)
         apply_btn.clicked.connect(self._save_and_apply_ui_prefs)
@@ -2116,7 +2131,13 @@ class MainWindow(QMainWindow):
         worker_count = int(self.worker_shell_count.value())
         prefs["worker_shell_count"] = worker_count
         agent_enabled = self.remote_agent_cb.isChecked()
+        proxy_error = self.proxy_settings.validation_error()
+        if proxy_error:
+            QMessageBox.warning(self, "Proxy configuration", proxy_error)
+            return
+        proxy_settings = self.proxy_settings.config()
         prefs["remote_agent_enabled"] = agent_enabled
+        prefs["proxy"] = proxy_settings.to_dict()
         self.store.save_ui_prefs(prefs)
         # Apply the scheduler limit synchronously so page loaders immediately
         # use the new value; resize the persistent shell pool asynchronously.
@@ -2130,7 +2151,8 @@ class MainWindow(QMainWindow):
         self._apply_ui_prefs()
         self.statusBar().showMessage(
             f"SSH worker limit applied: {worker_count}; "
-            f"remote agent {'enabled' if agent_enabled else 'disabled'}",
+            f"remote agent {'enabled' if agent_enabled else 'disabled'}; "
+            f"SSH proxy {'enabled' if proxy_settings.enabled else 'disabled'}",
             4000,
         )
 

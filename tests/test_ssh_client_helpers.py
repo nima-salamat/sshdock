@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import base64
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.core.models import SSHProfile
+from app.core.models import ProxySettings, ProxyType, SSHProfile
 from app.ssh.client import (
     AuthMaterial,
     CommandResult,
@@ -111,3 +112,32 @@ def test_explicit_terminal_environment_can_override_defaults() -> None:
     assert env["COLORTERM"] == "1"
     assert env["CLICOLOR"] == "1"
     assert env["CUSTOM"] == "value"
+
+
+def test_connect_kwargs_builds_sshdock_proxy_command() -> None:
+    profile = SSHProfile(
+        id="proxy",
+        name="Proxy",
+        host="server.example",
+        username="deploy",
+        proxy=ProxySettings(
+            enabled=True,
+            type=ProxyType.SOCKS5,
+            host="127.0.0.1",
+            port=1080,
+        ),
+    )
+    connection = SSHServerConnection(
+        profile,
+        credentials=SimpleNamespace(get=lambda *_: None),
+    )
+
+    kwargs = connection._connect_kwargs()
+
+    assert kwargs["proxy_command"][:4] == [
+        sys.executable, "-u", "-m", "app.ssh.proxy_bridge"
+    ]
+    assert "--proxy-host" in kwargs["proxy_command"]
+    assert "127.0.0.1" in kwargs["proxy_command"]
+    assert "--target-host" in kwargs["proxy_command"]
+    assert "server.example" in kwargs["proxy_command"]

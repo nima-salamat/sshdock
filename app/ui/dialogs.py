@@ -21,6 +21,7 @@ from app.core.errors import normalize_error
 from app.ssh.discovery import SSHAlias
 from app.ssh.keypaste import looks_like_private_key, write_pasted_key_to_temp
 from app.ssh.targets import is_alias_resolvable, parse_ssh_target, resolve_target
+from app.ui.widgets.proxy import ProxySettingsWidget
 
 try:
     import qtawesome as qta
@@ -1227,6 +1228,22 @@ class ConnectionDialog(QDialog):
         auth_layout.addRow("", self.remember)
         form.addWidget(auth_card)
 
+        # Shared proxy editor. New connections inherit the global default;
+        # saved profiles restore their own explicit proxy configuration.
+        proxy_card = QFrame()
+        proxy_card.setObjectName("card")
+        proxy_layout = QVBoxLayout(proxy_card)
+        proxy_layout.setContentsMargins(16, 14, 16, 14)
+        proxy_layout.setSpacing(8)
+        proxy_title = QLabel("SSH Proxy")
+        proxy_title.setObjectName("sectionTitle")
+        proxy_layout.addWidget(proxy_title)
+        self.proxy_settings = ProxySettingsWidget()
+        if self.store is not None:
+            self.proxy_settings.set_config(self.store.load_proxy_settings())
+        proxy_layout.addWidget(self.proxy_settings)
+        form.addWidget(proxy_card)
+
         # Advanced
         self.adv_toggle = QToolButton()
         self.adv_toggle.setText("▸  Advanced options")
@@ -1428,6 +1445,10 @@ class ConnectionDialog(QDialog):
         self.retries.setValue(5)
         self.retry_delay.setValue(2)
         self.auto_reconnect.setChecked(True)
+        if hasattr(self, "proxy_settings"):
+            self.proxy_settings.set_config(
+                self.store.load_proxy_settings() if self.store is not None else None
+            )
         if hasattr(self, "proxy_jump"):
             self.proxy_jump.clear()
         if hasattr(self, "forward_agent_adv"):
@@ -1825,6 +1846,10 @@ class ConnectionDialog(QDialog):
         self.agent.setChecked(True)
         if hasattr(self, "keepalive"):
             self.keepalive.setValue(alias.server_alive_interval or 30)
+        if hasattr(self, "proxy_settings"):
+            self.proxy_settings.set_config(
+                self.store.load_proxy_settings() if self.store is not None else None
+            )
         if hasattr(self, "retries"):
             self.retries.setValue(max(0, alias.server_alive_count_max or 3))
         if hasattr(self, "proxy_jump"):
@@ -1859,6 +1884,8 @@ class ConnectionDialog(QDialog):
         self.retries.setValue(profile.max_retries or 5)
         self.retry_delay.setValue(int(profile.retry_delay or 2))
         self.auto_reconnect.setChecked(bool(profile.auto_reconnect))
+        if hasattr(self, "proxy_settings"):
+            self.proxy_settings.set_config(profile.proxy)
         self.remember.setChecked(bool(profile.persist_secrets))
         if hasattr(self, "proxy_jump"):
             self.proxy_jump.setText(getattr(profile, "proxy_jump", None) or "")
@@ -1948,6 +1975,11 @@ class ConnectionDialog(QDialog):
             )
             return
 
+        proxy_error = self.proxy_settings.validation_error()
+        if proxy_error:
+            QMessageBox.warning(self, "Proxy configuration", proxy_error)
+            return
+
         # Look up an existing saved profile to reuse its id (so re-connecting
         # to the same server doesn't create duplicates).
         existing = next((p for p in self.profiles if p.alias == alias and alias), None)
@@ -1976,6 +2008,7 @@ class ConnectionDialog(QDialog):
             max_retries=self.retries.value(),
             retry_delay=float(self.retry_delay.value()),
             persist_secrets=self.remember.isChecked(),
+            proxy=self.proxy_settings.config(),
             proxy_jump=(self.proxy_jump.text().strip() or None) if hasattr(self, "proxy_jump") else None,
             forward_agent=bool(self.forward_agent_adv.isChecked()) if hasattr(self, "forward_agent_adv") else False,
         )

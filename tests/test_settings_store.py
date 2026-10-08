@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.core.models import AuthMethod, SSHProfile
+from app.core.models import AuthMethod, ProxySettings, ProxyType, SSHProfile
 from app.storage.settings import SettingsStore
 
 
@@ -103,3 +103,18 @@ def test_export_and_import_bundle(tmp_path: Path, monkeypatch) -> None:
     assert target.load_profiles() == [profile]
     assert target.load_compose_projects()["server-1"][0]["name"] == "web"
     assert target.load_ui_prefs()["theme"] == "light"
+
+
+def test_proxy_settings_round_trip(tmp_path: Path, monkeypatch) -> None:
+    store = _store(tmp_path, monkeypatch)
+    settings = ProxySettings(
+        enabled=True,
+        type=ProxyType.SOCKS5,
+        host="127.0.0.1",
+        port=1081,
+    )
+
+    store.save_proxy_settings(settings)
+
+    assert store.load_proxy_settings() == settings
+    assert store.load_ui_prefs()["proxy"]["enabled"] is True

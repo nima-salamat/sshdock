@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from platformdirs import user_config_dir
 
-from app.core.models import SSHProfile
+from app.core.models import ProxySettings, SSHProfile
 
 
 _DEFAULT_UI: dict[str, Any] = {
@@ -17,6 +17,7 @@ _DEFAULT_UI: dict[str, Any] = {
     "notifications_enabled": True,
     "worker_shell_count": 3,
     "remote_agent_enabled": False,
+    "proxy": ProxySettings().to_dict(),
 }
 
 
@@ -100,6 +101,16 @@ class SettingsStore:
         except (OSError, ValueError):
             pass
         return prefs
+
+    def load_proxy_settings(self) -> ProxySettings:
+        """Load the shared global proxy defaults."""
+        raw = self.load_ui_prefs().get("proxy")
+        return ProxySettings.from_dict(raw if isinstance(raw, dict) else None)
+
+    def save_proxy_settings(self, settings: ProxySettings) -> None:
+        prefs = self.load_ui_prefs()
+        prefs["proxy"] = settings.to_dict()
+        self.save_ui_prefs(prefs)
 
     def save_ui_prefs(self, prefs: dict[str, Any]) -> None:
         merged = dict(_DEFAULT_UI)
