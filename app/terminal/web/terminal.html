@@ -991,12 +991,19 @@
           }
           return false;
         }
-        if (ev.type === 'keydown' && suggestionsVisible && (ev.key === 'Enter' || ev.key === 'Tab')) {
+        if (ev.type === 'keydown' && suggestionsVisible && ev.key === 'Enter') {
           ev.preventDefault();
           ev.stopPropagation();
           if (suggestions.length) acceptSuggestion(selectedSuggestion);
           else hideSuggestions();
           return false;
+        }
+        // Tab belongs to the remote shell's native completion, never to the AI
+        // popup. Close the palette but let xterm forward Tab to bash/zsh/fish.
+        if (ev.type === 'keydown' && suggestionsVisible && ev.key === 'Tab') {
+          hideSuggestions();
+          hideGhost();
+          return true;
         }
         if (ev.type === 'keydown' && suggestionsVisible && ev.key === 'Escape') {
           ev.preventDefault();
@@ -1008,7 +1015,9 @@
           if (bridge && bridge.request_find) bridge.request_find();
           return false;
         }
-        if (ev.type === 'keydown' && (ev.key === 'Tab' || ev.key === 'ArrowRight') && ghostSuffix && inputModelKnown && !ev.ctrlKey && !ev.altKey) {
+        // ArrowRight explicitly accepts inline AI ghost text. Tab remains native
+        // shell completion and must not insert the AI candidate.
+        if (ev.type === 'keydown' && ev.key === 'ArrowRight' && ghostSuffix && inputModelKnown && !ev.ctrlKey && !ev.altKey) {
           ev.preventDefault();
           ev.stopPropagation();
           try {
