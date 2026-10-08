@@ -314,3 +314,37 @@ def test_add_command_learns_simple_children_not_comments_or_fragments():
         "git log --oneline",
     )
 
+def test_history_parser_filters_comments_and_groups_multiline_shell_entries():
+    snapshot = parse_history_output(
+        "__SSHDock_SHELL__=/bin/bash\n"
+        "__BASH__\n"
+        "# documentation comment\n"
+        "git status; docker ps\n"
+        "git log \\\n"
+        "    --oneline\n"
+        "if true; then\n"
+        "  echo do_not_learn_body\n"
+        "fi\n"
+        "printf 'hello\n"
+        "world'\n"
+        "pwd\n"
+    )
+
+    assert snapshot.commands == (
+        "git status",
+        "docker ps",
+        "git log --oneline",
+        "printf 'hello\nworld'",
+        "pwd",
+    )
+
+
+def test_shell_control_words_inside_comments_or_quotes_are_not_script_blocks():
+    from app.terminal.predictor import split_shell_commands
+
+    assert split_shell_commands('echo "if this is only text"') == [
+        'echo "if this is only text"'
+    ]
+    assert split_shell_commands("git status # if true; then") == ["git status"]
+    assert split_shell_commands("echo ok; if true; then echo no; fi") == []
+
