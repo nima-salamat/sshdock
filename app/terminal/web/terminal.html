@@ -837,7 +837,7 @@
         if (value === '\r' || value === '\n') {
           const submitted = inputModel;
           hideGhost();
-          if (submitted && bridge && bridge.report_command) {
+          if (submitted && inputModelKnown && bridge && bridge.report_command) {
             try { bridge.report_command(submitted); } catch (e) {}
           }
           inputModel = '';
