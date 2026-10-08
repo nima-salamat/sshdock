@@ -1138,10 +1138,10 @@ class CommandPredictor:
         cwd: str = "/",
         shell: str = "",
     ) -> bool:
-        safe = sanitize_command(command)
-        if safe is None:
+        parsed = split_shell_commands(command, limit=2)
+        if len(parsed) != 1:
             return False
-        canonical = normalize_prediction(safe)
+        canonical = normalize_prediction(parsed[0])
         scope = self._scope(server_id)
         features = self._feature_values(scope, canonical, canonical, cwd or "/", shell or "")
         prediction = 1.0 / (1.0 + math.exp(-max(-20.0, min(20.0, self._score(features)))))
@@ -1159,10 +1159,10 @@ class CommandPredictor:
         success: bool,
         server_id: str = "",
     ) -> bool:
-        safe = sanitize_command(command)
-        if safe is None:
+        parsed = split_shell_commands(command, limit=2)
+        if len(parsed) != 1:
             return False
-        canonical = normalize_prediction(safe)
+        canonical = normalize_prediction(parsed[0])
         target = self._success if success else self._failure
         target[self._scope(server_id)][canonical] += 1
         return True
@@ -1237,15 +1237,15 @@ class CommandPredictor:
                     continue
                 counter = target[self._scope(str(scope))]
                 for command, count in values.items():
-                    safe = sanitize_command(str(command))
-                    if safe is None:
+                    parsed = split_shell_commands(str(command), limit=2)
+                    if len(parsed) != 1:
                         continue
                     try:
                         amount = max(0, int(count))
                     except (TypeError, ValueError):
                         continue
                     if amount:
-                        counter[normalize_prediction(safe)] = amount
+                        counter[normalize_prediction(parsed[0])] = amount
 
         raw_weights = state.get("weights")
         if isinstance(raw_weights, Mapping):
