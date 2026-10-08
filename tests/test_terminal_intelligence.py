@@ -75,6 +75,8 @@ def test_terminal_session_hides_bootstrap_commands_and_clears_screen():
     assert "install_command(shell_name=shell_name, manage_echo=False)" in src
     assert "033[2J" in src
     assert "033[H" in src
+    assert "printf '\\r\\033[2K\\033[2J\\033[H'" in src
+    assert "history -d $HISTCMD" in src
     assert "stty echo 2>/dev/null" in src
 
 
@@ -112,9 +114,10 @@ def test_terminal_html_allows_ghost_acceptance_with_tab_or_arrow_right():
 
 def test_terminal_session_restores_pty_echo_after_integration():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
-    assert 'self.channel.write(b"stty -echo 2>/dev/null\\r")' in src
+    client = (ROOT / "app/ssh/client.py").read_text(encoding="utf-8")
+    assert "term_modes={asyncssh.PTY_ECHO: 0}" in client
     assert "stty echo 2>/dev/null" in src
-    assert "printf" in src
+    assert "history -d $HISTCMD" in src
     assert "033[2J" in src
 
 def test_terminal_html_disables_ghost_completion_for_alternate_screen():

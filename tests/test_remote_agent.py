@@ -71,7 +71,7 @@ def test_terminal_bootstrap_keeps_integration_on_the_live_shell():
     assert "async def _install_shell_integration(self):" in text
     assert "async def _prepare_shell_integration(self) -> None:" in text
     assert "install_command(shell_name=shell_name, manage_echo=False)" in text
-    assert "stty -echo 2>/dev/null" in text
+    assert "term_modes={asyncssh.PTY_ECHO: 0}" in (Path(__file__).parents[1] / "app/ssh/client.py").read_text(encoding="utf-8")
     assert "self.ssh.start_command(" not in text
     assert "DOCKER_PRETTY_SH" not in text
 

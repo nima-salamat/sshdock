@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from PySide6.QtCore import QObject, Signal
 
 from app.core.models import ConnectionState, SSHProfile
+from app.core.runtime import create_task
 from app.ssh.client import AuthMaterial, SSHServerConnection
 from app.storage.secure import CredentialStore
 from app.terminal.session import TerminalSession
@@ -93,9 +94,10 @@ class SessionManager(QObject):
         current = managed.reconnect_task
         if current is not None and not current.done():
             return
-        managed.reconnect_task = asyncio.create_task(
+        managed.reconnect_task = create_task(
             self._auto_reconnect(pid),
             name=f"ssh-auto-reconnect-{pid[:8]}",
+            owner="ssh-auto-reconnect",
         )
 
     async def _auto_reconnect(self, pid: str) -> None:

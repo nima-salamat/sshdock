@@ -121,7 +121,7 @@ class TerminalSession(QObject):
                 "else PROMPT_COMMAND=\"__sshdock_apply_prompt\"; fi;; esac; "
                 "fi; "
                 "__sshdock_apply_prompt(){ case \"${PS1:-}\" in *'@'*:*'# '|*'@'*:*'$ ') "
-                "PS1='\\[\\033[1;32m\\]${debian_chroot:+($debian_chroot)}\\u\\[\\033[0;90m\\]@\\[\\033[1;36m\\]\\h\\[\\033[0;90m\\]:\\[\\033[1;34m\\]\\w\\[\\033[0m\\] \\[\\033[1;33m\\]\\$\\[\\033[0m\\] ';; esac; }; "
+                "PS1='\\[\\033[1;32m\\]${debian_chroot:+($debian_chroot)}\\u@\\h\\[\\033[0;90m\\]\\[\\033[0;90m\\]:\\[\\033[1;34m\\]\\w\\[\\033[0m\\] \\[\\033[1;33m\\]\\$\\[\\033[0m\\] ';; esac; }; "
                 "__sshdock_apply_prompt; "
                 "alias ls >/dev/null 2>&1 || alias ls='ls --color=auto' 2>/dev/null; "
                 "alias grep >/dev/null 2>&1 || alias grep='grep --color=auto' 2>/dev/null; "
@@ -170,7 +170,7 @@ class TerminalSession(QObject):
             parts = [
                 # ECHO is disabled at PTY allocation time, so this clears the
                 # one startup prompt instead of leaving a duplicate prompt.
-                "printf '\\r\\033[2K'",
+                "printf '\\r\\033[2K\\033[2J\\033[H'",
             ]
             if setup:
                 parts.append(setup)

@@ -76,7 +76,7 @@ def test_terminal_bootstrap_uses_non_echoing_pty_and_cleans_bash_history():
     client = (ROOT / "app/ssh/client.py").read_text(encoding="utf-8")
     session = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
     assert "term_modes={asyncssh.PTY_ECHO: 0}" in client
-    assert "printf '\\r\\033[2K'" in session
+    assert "printf '\\r\\033[2K\\033[2J\\033[H'" in session
     assert "history -d $HISTCMD" in session
     assert "install_command(shell_name=shell_name, manage_echo=False)" in session
     assert "stty echo 2>/dev/null" in session
@@ -473,6 +473,7 @@ def test_bash_prompt_setup_is_syntactically_valid():
     )
     assert probe.returncode == 0, probe.stderr
     assert "\\u@\\h" in probe.stdout
+    assert "debian_chroot" in session
     assert "\\033[1;32m" in probe.stdout
     assert "\\033[1;36m" in probe.stdout
     assert "\\033[1;33m" in probe.stdout
