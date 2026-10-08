@@ -327,3 +327,19 @@ def test_terminal_context_changes_force_a_fresh_prediction():
     assert "completionContext.shell = String(value.shell || '');" in context_setter
     assert "requestGhostPrediction(true)" in context_setter
 
+def test_terminal_history_learning_yields_between_batches_and_saves_off_thread():
+    main = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
+    predictor = (ROOT / "app/terminal/predictor.py").read_text(encoding="utf-8")
+
+    start = main.index("async def _load_terminal_predictor_history(")
+    end = main.index("def _terminal_command_submitted(", start)
+    importer = main[start:end]
+    assert "prepare_snapshot_ingest" in importer
+    assert "batch_size = 32" in importer
+    assert "await asyncio.sleep(0.005)" in importer
+    assert "finish_snapshot_ingest" in importer
+
+    assert "await asyncio.to_thread(" in predictor
+    assert "parse_history_output, getattr(result, \"stdout\", \"\") or \"\"" in predictor
+    assert "await asyncio.to_thread(self.store.save_terminal_learning_state, state)" in main
+
