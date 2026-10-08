@@ -424,3 +424,33 @@ def test_cancelled_input_is_cleared_without_command_submission():
     assert "inputModel = ''" in interrupt_handler
     assert "hideGhost();" in interrupt_handler
     assert "bridge.report_command" not in interrupt_handler
+
+
+
+def test_ai_suggestion_feedback_is_deferred_until_real_command_result():
+    main = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
+    selected = main.split("def _terminal_suggestion_accepted(", 1)[1].split(
+        "def _terminal_suggestion_cancelled(", 1
+    )[0]
+    result = main.split("def _terminal_command_result(", 1)[1].split(
+        "def _terminal_suggestion_accepted(", 1
+    )[0]
+
+    assert "self._terminal_selected_suggestions[sid] = parsed[0]" in selected
+    assert "record_suggestion_acceptance(" not in selected
+    assert "if was_suggested:" in result
+    assert "record_suggestion_acceptance(" in result
+    assert "record_command_result(" in result
+
+
+def test_cancelling_input_clears_unsubmitted_suggestion_feedback():
+    main = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
+    widget = (ROOT / "app/terminal/web_widget.py").read_text(encoding="utf-8")
+    html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+
+    assert "def _terminal_suggestion_cancelled(" in main
+    assert "self._terminal_selected_suggestions.pop(sid, None)" in main
+    assert "suggestion_cancelled = Signal()" in widget
+    assert "def report_suggestion_cancelled(" in widget
+    assert "def _on_suggestion_cancelled(" in widget
+    assert html.count("bridge.report_suggestion_cancelled()") >= 3
