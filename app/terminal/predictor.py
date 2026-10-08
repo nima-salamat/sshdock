@@ -1305,6 +1305,10 @@ class CommandPredictor:
             state_version = int(state.get("version", 1))
         except (TypeError, ValueError):
             state_version = 1
+        # Older saved models may already contain mdocker aliases and
+        # weights adjusted by accepting those internal commands. Remove those
+        # rows/counters and reset shared weights if such legacy feedback exists.
+        legacy_magic_feedback = False
         raw_history = state.get("history")
         if isinstance(raw_history, Mapping):
             for scope, rows in raw_history.items():
@@ -1315,6 +1319,9 @@ class CommandPredictor:
                         continue
                     command = row.get("command")
                     if not isinstance(command, str):
+                        continue
+                    if _is_sshdock_internal_command(command):
+                        legacy_magic_feedback = True
                         continue
                     cwd = row.get("cwd") if isinstance(row.get("cwd"), str) else ""
                     # Version-2 imported shell history was ingested without
@@ -1344,7 +1351,11 @@ class CommandPredictor:
                     continue
                 counter = target[self._scope(str(scope))]
                 for command, count in values.items():
-                    parsed = split_shell_commands(str(command), limit=2)
+                    command_text = str(command)
+                    if _is_sshdock_internal_command(command_text):
+                        legacy_magic_feedback = True
+                        continue
+                    parsed = split_shell_commands(command_text, limit=2)
                     if len(parsed) != 1:
                         continue
                     try:
@@ -1371,6 +1382,9 @@ class CommandPredictor:
                 for value in values[-32:]:
                     if isinstance(value, str) and value:
                         bucket.append(value)
+
+        if legacy_magic_feedback:
+            self._weights = dict(self.DEFAULT_WEIGHTS)
 
         try:
             self._clock = max(self._clock, int(state.get("clock", self._clock)))
