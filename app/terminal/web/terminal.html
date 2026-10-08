@@ -351,11 +351,16 @@
       let inputModel = '';
       let inputModelKnown = true;
       let suggestionRequestSeq = 0;
+      let suggestionRefreshTimer = null;
       let suggestions = [];
       let selectedSuggestion = 0;
       let suggestionsVisible = false;
+      let ghostPredictionTimer = null;
+      let ghostPositionFramePending = false;
+      const GHOST_PREDICTION_DEBOUNCE_MS = 70;
+      const SUGGESTION_REFRESH_DEBOUNCE_MS = 100;
 
-      function hideGhost() {
+      function clearGhostVisual() {
         ghostCandidate = '';
         ghostSuffix = '';
         ghost.classList.remove('visible');
@@ -363,7 +368,20 @@
         ghost.textContent = '';
       }
 
+      function hideGhost() {
+        if (ghostPredictionTimer !== null) {
+          clearTimeout(ghostPredictionTimer);
+          ghostPredictionTimer = null;
+        }
+        ghostRequestSeq += 1;
+        clearGhostVisual();
+      }
+
       function hideSuggestions() {
+        if (suggestionRefreshTimer !== null) {
+          clearTimeout(suggestionRefreshTimer);
+          suggestionRefreshTimer = null;
+        }
         suggestionRequestSeq += 1;
         suggestionsVisible = false;
         suggestions = [];
@@ -511,6 +529,26 @@
       }
 
       function requestSuggestions(forceOpen) {
+        if (suggestionRefreshTimer !== null) {
+          clearTimeout(suggestionRefreshTimer);
+          suggestionRefreshTimer = null;
+        }
+        if (forceOpen) {
+          requestSuggestionsNow(true);
+          return;
+        }
+        if (!suggestionsVisible) return;
+
+        // A new keystroke invalidates in-flight results immediately, but waits
+        // until typing pauses before asking Python to rank the history again.
+        suggestionRequestSeq += 1;
+        suggestionRefreshTimer = setTimeout(function () {
+          suggestionRefreshTimer = null;
+          if (suggestionsVisible) requestSuggestionsNow(false);
+        }, SUGGESTION_REFRESH_DEBOUNCE_MS);
+      }
+
+      function requestSuggestionsNow(forceOpen) {
         if (!terminalAI.suggestionsEnabled) {
           if (forceOpen) hideSuggestions();
           return;
@@ -628,12 +666,12 @@
       }
 
       function scheduleGhostPosition() {
-        if (!ghostSuffix || !inputModelKnown) return;
+        if (!ghostSuffix || !inputModelKnown || ghostPositionFramePending) return;
+        ghostPositionFramePending = true;
         requestAnimationFrame(function () {
+          ghostPositionFramePending = false;
           if (!ghostSuffix || !inputModelKnown) return;
-          requestAnimationFrame(function () {
-            positionGhost();
-          });
+          positionGhost();
         });
       }
 
@@ -664,42 +702,70 @@
         if (index < text.length) ghost.appendChild(document.createTextNode(text.slice(index)));
       }
 
-      function requestGhostPrediction() {
+      function requestGhostPrediction(forceRefresh) {
         // Refresh an open Ctrl+Space palette when history/context changes even
         // if the inline ghost-shadow feature is disabled by user preference.
         if (suggestionsVisible) requestSuggestions(false);
+
+        if (ghostPredictionTimer !== null) {
+          clearTimeout(ghostPredictionTimer);
+          ghostPredictionTimer = null;
+        }
+        const seq = ++ghostRequestSeq;
+        const prefix = inputModel;
         if (!terminalAI.shadowEnabled) {
           hideGhost();
           return;
         }
-        if (!inputModelKnown || !inputModel || !bridge || !bridge.predict_command) {
+        if (!inputModelKnown || !prefix || !bridge || !bridge.predict_command) {
           hideGhost();
           return;
         }
-        const seq = ++ghostRequestSeq;
-        try {
-          bridge.predict_command(
-            inputModel,
-            completionContext.cwd || '/',
-            completionContext.shell || '',
-            completionContext.serverId || '',
-            function (candidate) {
-              if (seq !== ghostRequestSeq) return;
-              const value = normalizeGhostCandidate(candidate);
-              if (!value || !value.toLowerCase().startsWith(inputModel.toLowerCase()) || value.length <= inputModel.length) {
-                hideGhost();
-                return;
-              }
-              ghostCandidate = value;
-              ghostSuffix = value.slice(inputModel.length);
-              renderGhostSuffix(ghostSuffix);
-              ghost.classList.add('visible');
-              scheduleGhostPosition();
-            }
-          );
-        } catch (e) {
-          hideGhost();
+
+        // Keep a still-matching completion local while typing; this updates the
+        // suffix immediately without another Python/WebChannel round trip.
+        const cachedMatches = !forceRefresh && ghostCandidate &&
+          ghostCandidate.toLowerCase().startsWith(prefix.toLowerCase()) &&
+          ghostCandidate.length > prefix.length;
+        if (cachedMatches) {
+          ghostSuffix = ghostCandidate.slice(prefix.length);
+          renderGhostSuffix(ghostSuffix);
+          ghost.classList.add('visible');
+          scheduleGhostPosition();
+        } else {
+          clearGhostVisual();
         }
+
+        // WebChannel slots run on the GUI thread. Debouncing prevents fast
+        // typing/paste edits from queuing an expensive ranking call per key.
+        ghostPredictionTimer = setTimeout(function () {
+          ghostPredictionTimer = null;
+          if (seq !== ghostRequestSeq || !inputModelKnown || !inputModel || !bridge || !bridge.predict_command) return;
+          const requestedPrefix = inputModel;
+          try {
+            bridge.predict_command(
+              requestedPrefix,
+              completionContext.cwd || '/',
+              completionContext.shell || '',
+              completionContext.serverId || '',
+              function (candidate) {
+                if (seq !== ghostRequestSeq || requestedPrefix !== inputModel) return;
+                const value = normalizeGhostCandidate(candidate);
+                if (!value || !value.toLowerCase().startsWith(requestedPrefix.toLowerCase()) || value.length <= requestedPrefix.length) {
+                  clearGhostVisual();
+                  return;
+                }
+                ghostCandidate = value;
+                ghostSuffix = value.slice(requestedPrefix.length);
+                renderGhostSuffix(ghostSuffix);
+                ghost.classList.add('visible');
+                scheduleGhostPosition();
+              }
+            );
+          } catch (e) {
+            if (seq === ghostRequestSeq) clearGhostVisual();
+          }
+        }, GHOST_PREDICTION_DEBOUNCE_MS);
       }
      function setInputModel(value, known) {
         inputModel = value || '';
@@ -956,7 +1022,7 @@
             const buf = term.buffer && term.buffer.active;
             const cursorX = Math.max(0, Number(buf && buf.cursorX) || 0);
             if (ghostAnchorX != null && cursorX >= ghostAnchorX) ghostAnchorX = null;
-            positionGhost();
+            scheduleGhostPosition();
           }
         });
       } catch (e) {}
@@ -1053,7 +1119,7 @@
             terminalAI.suggestionsEnabled = data && data.suggestionsEnabled !== false;
             if (!terminalAI.shadowEnabled) hideGhost();
             if (!terminalAI.suggestionsEnabled) hideSuggestions();
-            if (inputModelKnown) requestGhostPrediction();
+            if (inputModelKnown) requestGhostPrediction(true);
           } catch (e) {}
         },
         setCompletionContext: function (data) {
@@ -1062,7 +1128,7 @@
             completionContext.serverId = String(value.serverId || '');
             completionContext.cwd = String(value.cwd || '/');
             completionContext.shell = String(value.shell || '');
-            if (inputModelKnown) requestGhostPrediction();
+            if (inputModelKnown) requestGhostPrediction(true);
           } catch (e) {
             hideGhost();
           }
