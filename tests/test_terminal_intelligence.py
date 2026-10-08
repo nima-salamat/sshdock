@@ -243,3 +243,17 @@ def test_main_window_applies_terminal_ai_preferences_to_existing_terminals():
     assert "terminal_ai_learn_history" in main
     assert "set_terminal_ai_settings" in main
     assert "clear_terminal_learning_state" in main
+
+def test_open_suggestion_palette_refreshes_when_terminal_context_changes():
+    html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    start = html.index("function requestGhostPrediction()")
+    end = html.index("function setInputModel(", start)
+    prediction = html[start:end]
+
+    # Ctrl+Space remains live when the remote-history task completes, including
+    # the valid configuration where only the popup is enabled.
+    assert prediction.index("if (suggestionsVisible) requestSuggestions(false);") < prediction.index(
+        "if (!terminalAI.shadowEnabled)"
+    )
+    assert "if (inputModelKnown) requestGhostPrediction();" in html
+
