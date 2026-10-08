@@ -118,3 +118,27 @@ def test_proxy_settings_round_trip(tmp_path: Path, monkeypatch) -> None:
 
     assert store.load_proxy_settings() == settings
     assert store.load_ui_prefs()["proxy"]["enabled"] is True
+
+
+def test_terminal_learning_state_round_trip(tmp_path: Path, monkeypatch) -> None:
+    store = _store(tmp_path, monkeypatch)
+    store.save_terminal_learning_state(
+        {"version": 2, "history": {"server-1": [{"command": "git status"}]}}
+    )
+    loaded = store.load_terminal_learning_state()
+    assert loaded["history"]["server-1"][0]["command"] == "git status"
+    store.clear_terminal_learning_state()
+    assert store.load_terminal_learning_state() == {}
+
+
+def test_terminal_learning_state_is_exported_and_imported(tmp_path: Path, monkeypatch) -> None:
+    source = _store(tmp_path / "source", monkeypatch)
+    source.save_terminal_learning_state(
+        {"version": 2, "weights": {"frequency": 3.0}}
+    )
+    bundle = tmp_path / "bundle.json"
+    source.export_bundle(bundle)
+
+    target = _store(tmp_path / "target", monkeypatch)
+    target.import_bundle(bundle, merge=False)
+    assert target.load_terminal_learning_state()["weights"]["frequency"] == 3.0
