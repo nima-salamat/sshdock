@@ -104,6 +104,18 @@ class MainWindow(QMainWindow):
         self.terminal_server_ids: dict[str, str] = {}
         self.terminal_shells: dict[str, str] = {}
         self._command_predictor = CommandPredictor()
+        ai_prefs = self.store.load_ui_prefs()
+        self._terminal_ai_shadow_enabled = bool(ai_prefs.get("terminal_ai_shadow_enabled", True))
+        self._terminal_ai_suggestions_enabled = bool(ai_prefs.get("terminal_ai_suggestions_enabled", True))
+        self._terminal_ai_learn_history = bool(ai_prefs.get("terminal_ai_learn_history", True))
+        self._terminal_ai_persist_learning = bool(ai_prefs.get("terminal_ai_persist_learning", True))
+        try:
+            if self._terminal_ai_persist_learning:
+                self._command_predictor.load_state_dict(
+                    self.store.load_terminal_learning_state()
+                )
+        except Exception:
+            log.debug("Could not restore terminal AI learning state", exc_info=True)
         self._tasks: set[asyncio.Task] = set()
         self.task_manager = TaskManager()
         self._page_refresh_task = None
@@ -3706,6 +3718,17 @@ class MainWindow(QMainWindow):
             term.set_completion_provider(self._predict_terminal_command)
             if hasattr(term, "set_suggestions_provider"):
                 term.set_suggestions_provider(self._predict_terminal_commands)
+            if hasattr(term, "set_suggestions_detail_provider"):
+                term.set_suggestions_detail_provider(self._predict_terminal_command_details)
+            if hasattr(term, "set_terminal_ai_settings"):
+                term.set_terminal_ai_settings(
+                    shadow_enabled=self._terminal_ai_shadow_enabled,
+                    suggestions_enabled=self._terminal_ai_suggestions_enabled,
+                )
+            if hasattr(term, "suggestion_accepted"):
+                term.suggestion_accepted.connect(
+                    lambda command, t=term: self._terminal_suggestion_accepted(command, t)
+                )
             term.set_completion_context(server_id=server_id, cwd="/", shell="")
         try:
             fam = str(prefs.get("terminal_font_family") or "Consolas")
@@ -3800,34 +3823,61 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Terminal failed: {exc}", 10000)
             log.exception("Terminal creation failed")
 
-    def _predict_terminal_command(self, prefix: str, cwd: str, shell: str, server_id: str) -> str:
-        """Return a ghost completion synchronously; the predictor is in-memory and tiny."""
+    def _persist_terminal_predictor(self) -> None:
+        if not self._terminal_ai_persist_learning:
+            return
+        try:
+            self.store.save_terminal_learning_state(
+                self._command_predictor.state_dict()
+            )
+        except Exception:
+            log.debug("Could not persist terminal AI learning state", exc_info=True)
+
+    def _predict_terminal_command(
+        self, prefix: str, cwd: str, shell: str, server_id: str
+    ) -> str:
+        """Return the highest-ranked AI shadow completion."""
+        if not self._terminal_ai_shadow_enabled:
+            return ""
         sid = server_id or self.terminal_server_ids.get(
-            self.terminal_picker.currentData() if getattr(self, "terminal_picker", None) else "",
+            self.terminal_picker.currentData()
+            if getattr(self, "terminal_picker", None)
+            else "",
             self.current_id or "",
         )
         value = self._command_predictor.suggest(
             prefix,
             server_id=sid or "",
             cwd=cwd or "/",
-            shell=shell or self.terminal_shells.get(
-                self.terminal_picker.currentData() if getattr(self, "terminal_picker", None) else "",
+            shell=shell
+            or self.terminal_shells.get(
+                self.terminal_picker.currentData()
+                if getattr(self, "terminal_picker", None)
+                else "",
                 "",
             ),
         )
         return str(value or "")
 
-    def _predict_terminal_commands(self, prefix: str, cwd: str, shell: str, server_id: str) -> list[str]:
-        """Return up to five context-ranked suggestions for the Ctrl+Space palette."""
+    def _predict_terminal_command_details(
+        self, prefix: str, cwd: str, shell: str, server_id: str
+    ) -> list[dict]:
+        """Return rich context-ranked candidates for the AI palette."""
+        if not self._terminal_ai_suggestions_enabled:
+            return []
         sid = server_id or self.terminal_server_ids.get(
-            self.terminal_picker.currentData() if getattr(self, "terminal_picker", None) else "",
+            self.terminal_picker.currentData()
+            if getattr(self, "terminal_picker", None)
+            else "",
             self.current_id or "",
         )
         effective_shell = shell or self.terminal_shells.get(
-            self.terminal_picker.currentData() if getattr(self, "terminal_picker", None) else "",
+            self.terminal_picker.currentData()
+            if getattr(self, "terminal_picker", None)
+            else "",
             "",
         )
-        value = self._command_predictor.suggest(
+        ranked = self._command_predictor.suggest_ranked(
             prefix,
             server_id=sid or "",
             cwd=cwd or "/",
@@ -3835,35 +3885,61 @@ class MainWindow(QMainWindow):
             limit=5,
             min_score=1.0,
         )
-        if isinstance(value, list):
-            return value[:5]
-        return [value] if isinstance(value, str) and value else []
+        return [candidate.to_dict() for candidate in ranked]
 
-    async def _load_terminal_predictor_history(self, sid: str, ssh, server_id: str, term) -> None:
+    def _predict_terminal_commands(
+        self, prefix: str, cwd: str, shell: str, server_id: str
+    ) -> list[str]:
+        """Compatibility wrapper returning only command strings."""
+        return [
+            item["command"]
+            for item in self._predict_terminal_command_details(
+                prefix, cwd, shell, server_id
+            )
+        ][:5]
+
+    async def _load_terminal_predictor_history(
+        self, sid: str, ssh, server_id: str, term
+    ) -> None:
         try:
             snapshot = await load_remote_history(ssh)
-            if snapshot.commands:
-                self._command_predictor.ingest_snapshot(snapshot, server_id=server_id)
+            if self._terminal_ai_learn_history and snapshot.commands:
+                self._command_predictor.ingest_snapshot(
+                    snapshot, server_id=server_id
+                )
+                self._persist_terminal_predictor()
             self.terminal_shells[sid] = snapshot.shell
             if hasattr(term, "set_completion_context"):
                 session = self.terms.get(sid)
                 term.set_completion_context(
                     server_id=server_id,
-                    cwd=getattr(session, "cwd", "/") if session is not None else "/",
+                    cwd=getattr(session, "cwd", "/")
+                    if session is not None
+                    else "/",
                     shell=snapshot.shell,
                 )
         except asyncio.CancelledError:
             raise
         except Exception:
-            log.debug("Terminal predictor history load failed for %s", server_id, exc_info=True)
+            log.debug(
+                "Terminal predictor history load failed for %s",
+                server_id,
+                exc_info=True,
+            )
 
     def _terminal_command_submitted(self, command: str, term) -> None:
-        """Observe explicitly submitted commands without intercepting shell transport."""
+        """Learn from explicitly submitted, already-sanitized commands."""
         if not command or not self.current_id:
             return
-        sid = next((key for key, widget in self.terminal_widgets.items() if widget is term.parentWidget()), None)
+        sid = next(
+            (
+                key
+                for key, widget in self.terminal_widgets.items()
+                if widget is term.parentWidget()
+            ),
+            None,
+        )
         if sid is None:
-            # The widget is nested in the terminal page; walk the mapping defensively.
             for key, page in self.terminal_widgets.items():
                 try:
                     if term is page or term.isAncestorOf(page):
@@ -3877,15 +3953,50 @@ class MainWindow(QMainWindow):
                     sid = key
                     break
         session = self.terms.get(sid) if sid else None
-        server_id = self.terminal_server_ids.get(sid or "", self.current_id)
+        server_id = self.terminal_server_ids.get(
+            sid or "", self.current_id
+        )
         if session is None:
             return
+        cwd = getattr(session, "cwd", "/") or "/"
+        shell = self.terminal_shells.get(sid or "", "")
         self._command_predictor.add_command(
+            command, server_id=server_id, cwd=cwd, shell=shell
+        )
+        self._persist_terminal_predictor()
+
+    def _terminal_suggestion_accepted(self, command: str, term) -> None:
+        if not command:
+            return
+        sid = next(
+            (
+                key
+                for key, widget in self.terminal_widgets.items()
+                if widget is term.parentWidget()
+            ),
+            None,
+        )
+        if sid is None:
+            for key, page in self.terminal_widgets.items():
+                try:
+                    if term is page or term.isAncestorOf(page):
+                        sid = key
+                        break
+                except Exception:
+                    continue
+        session = self.terms.get(sid) if sid else None
+        server_id = self.terminal_server_ids.get(
+            sid or "", self.current_id or ""
+        )
+        if session is None:
+            return
+        self._command_predictor.record_suggestion_acceptance(
             command,
             server_id=server_id,
             cwd=getattr(session, "cwd", "/") or "/",
             shell=self.terminal_shells.get(sid or "", ""),
         )
+        self._persist_terminal_predictor()
 
     def _terminal_cwd_changed(self, sid: str, path: str):
         """Shell → explorer: keep session.cwd and live-sync the visible explorer."""
