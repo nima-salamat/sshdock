@@ -305,11 +305,11 @@ def test_terminal_ai_prediction_is_debounced_and_ghost_layout_is_frame_batched()
     end = html.index("function setInputModel(", start)
     prediction = html[start:end]
 
-    assert "GHOST_PREDICTION_DEBOUNCE_MS = 90" in html
+    assert "GHOST_PREDICTION_DEBOUNCE_MS = 180" in html
     assert "setTimeout(function ()" in prediction
     assert "cachedMatches" in prediction
     assert "requestedPrefix !== inputModel" in prediction
-    assert "SUGGESTION_REFRESH_DEBOUNCE_MS = 100" in html
+    assert "SUGGESTION_REFRESH_DEBOUNCE_MS = 180" in html
     assert "ghostPositionFramePending" in html
     assert "if (!ghostSuffix || !inputModelKnown || ghostPositionFramePending) return;" in html
 
