@@ -169,7 +169,18 @@
       overflow: hidden;
       max-width: calc(100% - 26px);
     }
-    #sshdock-ghost.visible { opacity: 1; }
+    #sshdock-ghost.visible {
+      opacity: 0.78;
+      text-shadow: 0 0 9px rgba(111, 182, 255, 0.18);
+      transition: opacity 80ms ease, transform 80ms ease;
+    }
+    #sshdock-ghost.visible.ai-learning {
+      animation: sshdock-ai-breathe 1.8s ease-in-out infinite;
+    }
+    @keyframes sshdock-ai-breathe {
+      0%, 100% { opacity: 0.64; }
+      50% { opacity: 0.84; }
+    }
     #sshdock-ghost .ghost-gap { display:inline-block; height:1em; vertical-align:top; }
     #sshdock-ghost.light { color: rgba(71, 85, 105, 0.68); }
 
@@ -205,6 +216,18 @@
       align-items: center; justify-content: center; box-sizing: border-box;
       color: #9db8d8; background: #1a2635; border: 1px solid #34475e;
       border-radius: 4px; font-size: 10px;
+    }
+    #sshdock-suggestions .suggestion-meta {
+      flex: 0 0 auto; display:flex; align-items:center; gap:6px;
+      font-family: system-ui, sans-serif; font-size:10px; color:#7f94ab;
+      white-space:nowrap;
+    }
+    #sshdock-suggestions .suggestion-source {
+      padding:2px 5px; border-radius:999px; border:1px solid #34475e;
+      background:#121d29; color:#90bce9; text-transform:uppercase; letter-spacing:.04em;
+    }
+    #sshdock-suggestions .suggestion-confidence {
+      min-width:28px; text-align:right; color:#7188a2;
     }
     #sshdock-suggestions .suggestion-command {
       flex: 1 1 auto; min-width: 0; white-space: pre; overflow: hidden;
@@ -317,6 +340,10 @@
         cwd: '/',
         shell: ''
       };
+      let terminalAI = {
+        shadowEnabled: true,
+        suggestionsEnabled: true
+      };
       let ghostCandidate = '';
       let ghostSuffix = '';
       let ghostRequestSeq = 0;
@@ -332,6 +359,7 @@
         ghostCandidate = '';
         ghostSuffix = '';
         ghost.classList.remove('visible');
+        ghost.classList.remove('ai-learning');
         ghost.textContent = '';
       }
 
@@ -378,14 +406,24 @@
       }
 
       function renderSuggestions(values, emptyMessage) {
-        suggestions = (values || []).slice(0, 5);
+        suggestions = (values || []).slice(0, 5).map(function (value) {
+          if (typeof value === 'string') {
+            return {
+              command: value,
+              confidence: 60,
+              source: 'history',
+              reason: 'Learned from terminal history'
+            };
+          }
+          return value || {};
+        }).filter(function (value) { return !!value.command; });
         selectedSuggestion = Math.max(0, Math.min(selectedSuggestion, Math.max(0, suggestions.length - 1)));
         suggestionPopup.textContent = '';
 
         const heading = document.createElement('div');
         heading.className = 'suggestion-heading';
         const title = document.createElement('span');
-        title.textContent = 'Command suggestions';
+        title.textContent = 'AI command suggestions';
         const count = document.createElement('span');
         count.className = 'count';
         count.textContent = suggestions.length ? suggestions.length + ' found' : 'No matches';
@@ -409,9 +447,22 @@
             number.textContent = String(index + 1);
             const value = document.createElement('span');
             value.className = 'suggestion-command';
-            value.textContent = command;
+            value.textContent = command.command;
             row.appendChild(number);
             row.appendChild(value);
+            const meta = document.createElement('span');
+            meta.className = 'suggestion-meta';
+            const source = document.createElement('span');
+            source.className = 'suggestion-source';
+            source.textContent = String(command.source || 'history');
+            source.title = String(command.reason || 'Learned from terminal context');
+            const confidence = document.createElement('span');
+            confidence.className = 'suggestion-confidence';
+            const conf = Number(command.confidence);
+            confidence.textContent = Number.isFinite(conf) ? Math.round(conf) + '%' : '';
+            meta.appendChild(source);
+            meta.appendChild(confidence);
+            row.appendChild(meta);
             row.addEventListener('mouseenter', function () {
               selectedSuggestion = index;
               updateSuggestionSelection();
@@ -443,10 +494,13 @@
 
       function acceptSuggestion(index) {
         if (!suggestionsVisible || index < 0 || index >= suggestions.length) return false;
-        const candidate = normalizeGhostCandidate(suggestions[index]);
+        const candidate = normalizeGhostCandidate(suggestions[index].command || '');
         if (inputModel && !candidate.toLowerCase().startsWith(inputModel.toLowerCase())) return false;
         const suffix = candidate.slice(inputModel.length);
         if (suffix) sendInput(suffix);
+        if (bridge && bridge.report_suggestion_accepted) {
+          try { bridge.report_suggestion_accepted(candidate); } catch (e) {}
+        }
         inputModel = candidate;
         inputModelKnown = true;
         ghostAnchorX = null;
