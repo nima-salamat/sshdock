@@ -399,3 +399,27 @@ def test_terminal_learning_waits_for_real_shell_result():
     assert "record_command_result(" in result
     assert "success=int(exit_code) == 0" in result
     assert "session.command_result.connect(" in main
+
+
+
+def test_multiline_paste_is_never_reported_as_a_submitted_command():
+    html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    start = html.index("A paste can arrive as one onData payload containing multiple lines.")
+    end = html.index("/* Printable insertion is only unambiguous", start)
+    paste_handler = html[start:end]
+
+    assert "Never report multiline paste as a" in paste_handler
+    assert "bridge.report_command" not in paste_handler
+    assert "inputModel = ''" in paste_handler
+    assert "pasteEndsAtCommandBoundary" in paste_handler
+
+
+def test_cancelled_input_is_cleared_without_command_submission():
+    html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    start = html.index("if (value.indexOf('\\x03') >= 0 || value.indexOf('\\x04') >= 0)")
+    end = html.index("if (value.indexOf('\\x17')", start)
+    interrupt_handler = html[start:end]
+
+    assert "inputModel = ''" in interrupt_handler
+    assert "hideGhost();" in interrupt_handler
+    assert "bridge.report_command" not in interrupt_handler
