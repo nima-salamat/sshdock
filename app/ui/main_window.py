@@ -107,6 +107,7 @@ class MainWindow(QMainWindow):
         self._tasks: set[asyncio.Task] = set()
         self.task_manager = TaskManager()
         self._page_refresh_task = None
+        self._server_ui_states: dict[str, str] = {}
         self._shutdown_task: asyncio.Task | None = None
         self._shutdown_event: asyncio.Event | None = None
         self._terminal_panel_expanded = False
@@ -1949,10 +1950,14 @@ class MainWindow(QMainWindow):
         p=self.manager.servers[self.current_id].profile; self.server_name.setText(p.name or p.alias or p.host); self.server_details.setText(f"{p.username}@{p.host or p.alias}:{p.port}")
 
     def _manager_state(self,pid,state):
+        previous = self._server_ui_states.get(pid)
+        self._server_ui_states[pid] = state
         if pid!=self.current_id:return
         connected=state=="connected"; reconnecting=state=="reconnecting" or state=="connecting"
         self.state.setObjectName("stateConnected" if connected else "stateReconnecting" if reconnecting else "stateDisconnected"); self.state.style().unpolish(self.state); self.state.style().polish(self.state); self.state.setText("● Connected" if connected else "● Reconnecting…" if reconnecting else "● Disconnected")
         self._set_connection_buttons(connected or reconnecting)
+        if connected and previous == "reconnecting":
+            self._spawn(self.refresh_current_page(), name="Refresh after SSH reconnect")
 
     def _set_connection_state(self,connected): self._manager_state(self.current_id, "connected" if connected else "disconnected")
 

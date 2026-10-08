@@ -154,8 +154,9 @@ def test_compose_panel_table_is_resizable():
     assert "ResizeMode.ResizeToContents" not in COMPOSE_PANEL_SRC
     assert "ResizeMode.Stretch" not in COMPOSE_PANEL_SRC
     assert "ResizeMode.Fixed" not in COMPOSE_PANEL_SRC
-    # Interactive must be set for every column
-    assert "QHeaderView.ResizeMode.Interactive" in COMPOSE_PANEL_SRC
+    # Compose now delegates common resize behavior to StandardTableWidget.
+    assert "StandardTableWidget" in COMPOSE_PANEL_SRC
+    assert "ColumnSpec" in COMPOSE_PANEL_SRC
     assert "setStretchLastSection(False)" in COMPOSE_PANEL_SRC
 
 
@@ -167,8 +168,9 @@ def test_file_browser_table_is_resizable():
     """The remote file browser's table must use Interactive for all columns."""
     # Old Stretch mode for col 0 must be gone
     assert "setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)" not in BROWSER_SRC
-    # Interactive must be set for every column
-    assert "QHeaderView.ResizeMode.Interactive" in BROWSER_SRC
+    # File browser delegates common resize behavior to StandardTableWidget.
+    assert "StandardTableWidget" in BROWSER_SRC
+    assert "ColumnSpec" in BROWSER_SRC
     assert "setStretchLastSection(False)" in BROWSER_SRC
 
 

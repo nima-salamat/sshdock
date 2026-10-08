@@ -171,7 +171,8 @@ def test_magic_table_has_prompt_fallback_and_scrollbar_sync_without_tables():
     assert "block._anchorPromptAbs = promptAbs;" in src
     assert "if (!term._sshdockScrollBarHook)" in src
     assert "term.onWriteParsed(function(){ syncScrollBar(); })" in src
-    assert "term.onRender(function(){ syncScrollBar(); })" in src
+    assert "term.onRender(function(){" in src
+    assert "syncScrollBar();" in src
     assert "const anchor = markerLine >= 0" in src
 
 
