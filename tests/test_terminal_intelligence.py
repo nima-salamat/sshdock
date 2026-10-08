@@ -343,3 +343,59 @@ def test_terminal_history_learning_yields_between_batches_and_saves_off_thread()
     assert "parse_history_output, getattr(result, \"stdout\", \"\") or \"\"" in predictor
     assert "await asyncio.to_thread(self.store.save_terminal_learning_state, state)" in main
 
+
+
+
+def test_terminal_session_reports_and_strips_shell_exit_status():
+    from app.terminal.session import TerminalSession
+
+    session = TerminalSession(ssh=None, title="test")
+    results = []
+    session.command_result.connect(results.append)
+
+    visible = session._extract_cwd(
+        b"command output\\x1b]777;sshdock-result;7\\x07prompt"
+    )
+
+    assert visible == b"command outputprompt"
+    assert results == [7]
+
+
+def test_terminal_session_handles_split_exit_status_marker():
+    from app.terminal.session import TerminalSession
+
+    session = TerminalSession(ssh=None, title="test")
+    results = []
+    session.command_result.connect(results.append)
+
+    first = session._extract_cwd(b"output\\x1b]777;sshdock-result;1")
+    second = session._extract_cwd(b"\\x07prompt")
+
+    assert first == b"output"
+    assert second == b"prompt"
+    assert results == [1]
+
+
+def test_shell_integration_emits_exit_status_for_supported_shells():
+    src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
+
+    assert 'self.result_reporting_enabled = shell_name in {"bash", "zsh", "fish"}' in src
+    assert src.count("sshdock-result;%s") >= 3
+    assert "precmd_functions=(__sshdock_cwd" in src
+    assert "set -l __sshdock_status $status" in src
+
+
+def test_terminal_learning_waits_for_real_shell_result():
+    main = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
+    submitted = main.split("def _terminal_command_submitted(", 1)[1].split(
+        "def _terminal_command_result(", 1
+    )[0]
+    result = main.split("def _terminal_command_result(", 1)[1].split(
+        "def _terminal_suggestion_accepted(", 1
+    )[0]
+
+    assert "_terminal_pending_command_results[sid]" in submitted
+    assert "_command_predictor.add_command(" not in submitted
+    assert "record_command_result(" in result
+    assert "success=int(exit_code) == 0" in result
+    assert "session.command_result.connect(" in main
