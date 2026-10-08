@@ -208,6 +208,320 @@ class CommandPredictor:
         except ValueError:
             return tuple(prefix.split())
 
+    @staticmethod
+    def _shell_name(shell: str) -> str:
+        return str(shell or "").replace("\\", "/").rsplit("/", 1)[-1].lower()
+
+    @staticmethod
+    def _command_parts(command: str) -> tuple[str, ...]:
+        try:
+            return tuple(shlex.split(command))
+        except ValueError:
+            return tuple(command.split())
+
+    def clear(self) -> None:
+        self._history.clear()
+        self._counts.clear()
+        self._last_seen.clear()
+        self._transitions.clear()
+        self._accepted.clear()
+        self._success.clear()
+        self._failure.clear()
+        self._snapshot_fingerprints.clear()
+        self._weights = dict(self.DEFAULT_WEIGHTS)
+        self._clock = 0
+
+    def _feature_values(
+        self,
+        scope: str,
+        command: str,
+        prefix: str,
+        cwd: str,
+        shell: str,
+    ) -> dict[str, float]:
+        observations = tuple(self._history[scope])
+        counts = self._counts[scope]
+        count = counts.get(command, 0)
+        frequency = min(1.0, math.log1p(count) / math.log(16.0))
+
+        last = self._last_seen[scope].get(command, 0)
+        age = max(0, self._clock - last)
+        recency = math.exp(-age / 80.0) if last else 0.0
+
+        previous = observations[-1].command if observations else None
+        transition_count = self._transitions[scope].get((previous, command), 0) if previous else 0
+        transition = min(1.0, math.log1p(transition_count) / math.log(8.0))
+
+        cwd_norm = cwd or "/"
+        cwd_hits = sum(
+            1 for obs in observations
+            if (obs.cwd or "/") == cwd_norm and obs.command == command
+        )
+        cwd_affinity = min(1.0, math.log1p(cwd_hits) / math.log(6.0))
+
+        shell_name = self._shell_name(shell)
+        shell_hits = 0
+        if shell_name:
+            shell_hits = sum(
+                1 for obs in observations
+                if self._shell_name(obs.shell) == shell_name and obs.command == command
+            )
+        shell_affinity = min(1.0, math.log1p(shell_hits) / math.log(6.0))
+
+        current_parts = self._prefix_parts(prefix or "")
+        candidate_parts = self._command_parts(command)
+        prefix_fit = 1.0 if not (prefix or "").strip() or command.casefold().startswith((prefix or "").casefold()) else 0.0
+
+        token_fit = 0.0
+        if current_parts and candidate_parts[: len(current_parts)] == current_parts:
+            token_fit = 1.0
+        elif len(current_parts) == 1 and candidate_parts and candidate_parts[0].casefold().startswith(current_parts[0].casefold()):
+            token_fit = 0.65
+
+        accepted_count = self._accepted[scope].get(command, 0)
+        accepted_total = max(1, sum(self._accepted[scope].values()))
+        accepted = min(1.0, math.log1p(accepted_count) / math.log1p(accepted_total + 2))
+
+        success_count = self._success[scope].get(command, 0)
+        failure_count = self._failure[scope].get(command, 0)
+        outcomes = success_count + failure_count
+        success = success_count / outcomes if outcomes else 0.0
+        failure = failure_count / outcomes if outcomes else 0.0
+
+        return {
+            "frequency": frequency,
+            "recency": recency,
+            "transition": transition,
+            "cwd": cwd_affinity,
+            "shell": shell_affinity,
+            "token_fit": token_fit,
+            "prefix_fit": prefix_fit,
+            "accepted": accepted,
+            "success": success,
+            "failure": failure,
+        }
+
+    def _score(self, features: Mapping[str, float]) -> float:
+        score = self._weights.get("bias", 0.0)
+        for name, value in features.items():
+            score += self._weights.get(name, 0.0) * float(value)
+        return score
+
+    @staticmethod
+    def _reason(features: Mapping[str, float]) -> tuple[str, str]:
+        ranked = sorted(
+            ((name, float(value)) for name, value in features.items() if value > 0.05),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+        top = ranked[0][0] if ranked else "history"
+        reasons = {
+            "accepted": ("learned", "You tend to accept this command"),
+            "transition": ("next", "Often follows your recent command"),
+            "cwd": ("cwd", "Common in this directory"),
+            "shell": ("shell", "Fits this shell"),
+            "frequency": ("history", "Frequently used in your history"),
+            "recency": ("recent", "Used recently"),
+            "token_fit": ("context", "Strong token/context match"),
+            "prefix_fit": ("prefix", "Matches what you typed"),
+        }
+        return reasons.get(top, ("history", "Learned from terminal context"))
+
+    @staticmethod
+    def _confidence(scores: list[float], score: float) -> float:
+        if not scores:
+            return 0.0
+        ordered = sorted(scores, reverse=True)
+        margin = max(0.0, score - (ordered[1] if len(ordered) > 1 else score - 2.5))
+        value = 52.0 + 35.0 * (1.0 - math.exp(-max(0.0, score) / 8.0))
+        value += 13.0 * (1.0 - math.exp(-margin / 2.2))
+        return max(50.0, min(99.0, value))
+
+    def suggest_ranked(
+        self,
+        prefix: str,
+        *,
+        server_id: str = "",
+        cwd: str = "/",
+        shell: str = "",
+        limit: int = 5,
+        min_score: float = 0.0,
+    ) -> list[PredictionCandidate]:
+        scope = self._scope(server_id)
+        counts = self._counts[scope]
+        if not counts:
+            return []
+
+        raw = prefix or ""
+        empty_prefix = not raw.strip()
+        scored: list[tuple[float, str, dict[str, float]]] = []
+
+        for command in counts:
+            candidate = normalize_prediction(command)
+            if not empty_prefix and not candidate.casefold().startswith(raw.casefold()):
+                continue
+            if len(candidate) <= len(raw):
+                continue
+            features = self._feature_values(scope, candidate, raw, cwd or "/", shell or "")
+            score = self._score(features)
+            if score >= float(min_score):
+                scored.append((score, candidate, features))
+
+        scored.sort(key=lambda item: (-item[0], item[1].casefold(), item[1]))
+        scores = [score for score, _, _ in scored]
+        selected: list[PredictionCandidate] = []
+        seen: set[str] = set()
+
+        for score, candidate, features in scored:
+            key = candidate.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            source, reason = self._reason(features)
+            selected.append(
+                PredictionCandidate(
+                    command=candidate,
+                    score=score,
+                    confidence=self._confidence(scores, score),
+                    source=source,
+                    reason=reason,
+                    features=features,
+                )
+            )
+            if len(selected) >= max(1, min(5, int(limit))):
+                break
+        return selected
+
+    def record_suggestion_acceptance(
+        self,
+        command: str,
+        *,
+        server_id: str = "",
+        cwd: str = "/",
+        shell: str = "",
+    ) -> bool:
+        safe = sanitize_command(command)
+        if safe is None:
+            return False
+        canonical = normalize_prediction(safe)
+        scope = self._scope(server_id)
+        features = self._feature_values(scope, canonical, canonical, cwd or "/", shell or "")
+        prediction = 1.0 / (1.0 + math.exp(-max(-20.0, min(20.0, self._score(features)))))
+        learning_rate = 0.08
+        for name, value in features.items():
+            updated = self._weights.get(name, 0.0) + learning_rate * (1.0 - prediction) * value
+            self._weights[name] = max(-4.0, min(6.0, updated))
+        self._accepted[scope][canonical] += 1
+        return True
+
+    def record_command_result(
+        self,
+        command: str,
+        *,
+        success: bool,
+        server_id: str = "",
+    ) -> bool:
+        safe = sanitize_command(command)
+        if safe is None:
+            return False
+        canonical = normalize_prediction(safe)
+        target = self._success if success else self._failure
+        target[self._scope(server_id)][canonical] += 1
+        return True
+
+    def state_dict(self) -> dict[str, Any]:
+        histories = {}
+        for scope, observations in self._history.items():
+            histories[scope] = [
+                {"command": obs.command, "cwd": obs.cwd, "shell": obs.shell}
+                for obs in list(observations)[-self.max_commands :]
+            ]
+        return {
+            "version": self.STATE_VERSION,
+            "max_commands": self.max_commands,
+            "clock": self._clock,
+            "weights": dict(self._weights),
+            "history": histories,
+            "accepted": {scope: dict(values) for scope, values in self._accepted.items() if values},
+            "success": {scope: dict(values) for scope, values in self._success.items() if values},
+            "failure": {scope: dict(values) for scope, values in self._failure.items() if values},
+            "snapshot_fingerprints": {
+                scope: list(values)[-32:]
+                for scope, values in self._snapshot_fingerprints.items()
+                if values
+            },
+        }
+
+    def load_state_dict(self, state: Mapping[str, Any] | None) -> None:
+        if not isinstance(state, Mapping):
+            return
+        self.clear()
+        raw_history = state.get("history")
+        if isinstance(raw_history, Mapping):
+            for scope, rows in raw_history.items():
+                if not isinstance(rows, list):
+                    continue
+                for row in rows[-self.max_commands:]:
+                    if not isinstance(row, Mapping):
+                        continue
+                    command = row.get("command")
+                    if not isinstance(command, str):
+                        continue
+                    cwd = row.get("cwd") if isinstance(row.get("cwd"), str) else "/"
+                    shell = row.get("shell") if isinstance(row.get("shell"), str) else ""
+                    self.add_command(
+                        command,
+                        server_id=str(scope),
+                        cwd=cwd or "/",
+                        shell=shell,
+                    )
+
+        for name, target in (
+            ("accepted", self._accepted),
+            ("success", self._success),
+            ("failure", self._failure),
+        ):
+            raw = state.get(name)
+            if not isinstance(raw, Mapping):
+                continue
+            for scope, values in raw.items():
+                if not isinstance(values, Mapping):
+                    continue
+                counter = target[self._scope(str(scope))]
+                for command, count in values.items():
+                    safe = sanitize_command(str(command))
+                    if safe is None:
+                        continue
+                    try:
+                        amount = max(0, int(count))
+                    except (TypeError, ValueError):
+                        continue
+                    if amount:
+                        counter[normalize_prediction(safe)] = amount
+
+        raw_weights = state.get("weights")
+        if isinstance(raw_weights, Mapping):
+            for name, default in self.DEFAULT_WEIGHTS.items():
+                try:
+                    self._weights[name] = max(-4.0, min(6.0, float(raw_weights.get(name, default))))
+                except (TypeError, ValueError):
+                    self._weights[name] = default
+
+        fingerprints = state.get("snapshot_fingerprints")
+        if isinstance(fingerprints, Mapping):
+            for scope, values in fingerprints.items():
+                if not isinstance(values, list):
+                    continue
+                bucket = self._snapshot_fingerprints[self._scope(str(scope))]
+                for value in values[-32:]:
+                    if isinstance(value, str) and value:
+                        bucket.append(value)
+
+        try:
+            self._clock = max(self._clock, int(state.get("clock", self._clock)))
+        except (TypeError, ValueError):
+            pass
+
     def suggest(
         self,
         prefix: str,
