@@ -250,7 +250,7 @@ def _here_doc_delimiters(line: str) -> list[str]:
             index += 1
             continue
         if char == "#" and (index == 0 or line[index - 1].isspace()):
-            newline = line.find("\\n", index)
+            newline = line.find("\n", index)
             if newline < 0:
                 break
             index = newline + 1
