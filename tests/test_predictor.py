@@ -154,3 +154,20 @@ def test_predictor_remote_history_snapshot_is_idempotent():
     assert predictor.ingest_snapshot(snapshot, server_id="srv") == 2
     assert predictor.ingest_snapshot(snapshot, server_id="srv") == 0
     assert predictor.history(server_id="srv") == ("git status", "git log")
+
+def test_predictor_has_starter_suggestions_before_remote_history_load():
+    predictor = CommandPredictor()
+
+    # A freshly connected server may not have completed its asynchronous
+    # history read when the first key or Ctrl+Space request arrives.
+    shadow = predictor.suggest("d", server_id="fresh-server")
+    ranked = predictor.suggest_ranked(
+        "", server_id="fresh-server", limit=5, min_score=1.0
+    )
+
+    assert isinstance(shadow, str) and shadow.startswith("d")
+    assert len(ranked) == 5
+    assert all(candidate.source == "starter" for candidate in ranked)
+    # Bootstrap commands must not become falsely learned user history.
+    assert predictor.history(server_id="fresh-server") == ()
+
