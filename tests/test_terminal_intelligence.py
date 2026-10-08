@@ -202,3 +202,44 @@ def test_terminal_popup_is_keyboard_operable_and_uses_predictor():
     assert "def set_suggestions_provider" in widget
     assert "def _predict_terminal_commands" in main
     assert "limit=5" in main
+
+
+def test_terminal_ai_rich_bridge_settings_and_feedback_are_wired():
+    widget = (ROOT / "app/terminal/web_widget.py").read_text(encoding="utf-8")
+    main = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
+    html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    settings = (ROOT / "app/storage/settings.py").read_text(encoding="utf-8")
+    dialog = (ROOT / "app/ui/dialogs.py").read_text(encoding="utf-8")
+
+    assert "def suggest_command_details" in widget
+    assert "suggestion_accepted = Signal(str)" in widget
+    assert "def set_suggestions_detail_provider" in widget
+    assert "def set_terminal_ai_settings" in widget
+    assert "def _on_suggestion_accepted" in widget
+    assert "_predict_terminal_command_details" in main
+    assert "record_suggestion_acceptance" in main
+    assert "terminal_ai_shadow_enabled" in main
+    assert "terminal_ai_persist_learning" in main
+    assert "suggest_command_details" in html
+    assert "report_suggestion_accepted" in html
+    assert "setTerminalAISettings" in html
+    assert "ai-learning" in html
+    assert "terminal_ai_shadow_enabled" in settings
+    assert "Terminal intelligence" in dialog
+
+
+def test_terminal_ai_css_exposes_shadow_and_confidence_metadata():
+    html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    assert "suggestion-confidence" in html
+    assert "suggestion-source" in html
+    assert "AI command suggestions" in html
+    assert "sshdock-ai-breathe" in html
+    assert "terminalAI.shadowEnabled" in html
+
+
+def test_main_window_applies_terminal_ai_preferences_to_existing_terminals():
+    main = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
+    assert "terminal_ai_suggestions_enabled" in main
+    assert "terminal_ai_learn_history" in main
+    assert "set_terminal_ai_settings" in main
+    assert "clear_terminal_learning_state" in main
