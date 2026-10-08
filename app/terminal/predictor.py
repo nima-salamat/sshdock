@@ -250,7 +250,11 @@ def _here_doc_delimiters(line: str) -> list[str]:
             index += 1
             continue
         if char == "#" and (index == 0 or line[index - 1].isspace()):
-            break
+            newline = line.find("\\n", index)
+            if newline < 0:
+                break
+            index = newline + 1
+            continue
         if char in {"'", '"'}:
             quote = char
             index += 1
@@ -348,7 +352,7 @@ def split_shell_commands(command: str, *, limit: int = 64) -> list[str]:
         return []
     # Here-doc bodies can look like commands; don't learn part of those inputs.
     # Here-strings (<<<) are not here-docs.
-    if re.search(r"(?<!<)<<(?!<)", value):
+    if _here_doc_delimiters(value):
         return []
     # Function definitions and brace-wrapped shell groups are scripts, not leaf
     # commands. Never learn their inner statements as independent commands.
