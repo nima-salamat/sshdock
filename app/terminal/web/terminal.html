@@ -511,8 +511,12 @@
       }
 
       function requestSuggestions(forceOpen) {
+        if (!terminalAI.suggestionsEnabled) {
+          if (forceOpen) hideSuggestions();
+          return;
+        }
         if (!forceOpen && !suggestionsVisible) return;
-        if (!inputModelKnown || !bridge || !bridge.suggest_commands) {
+        if (!inputModelKnown || !bridge || (!bridge.suggest_command_details && !bridge.suggest_commands)) {
           if (forceOpen) renderSuggestions([], 'This command line is not in a safe-to-complete state. Press Esc, then type a new command.');
           else hideSuggestions();
           return;
@@ -530,7 +534,8 @@
         }
         const seq = ++suggestionRequestSeq;
         try {
-          bridge.suggest_commands(
+          const suggestApi = bridge.suggest_command_details || bridge.suggest_commands;
+          suggestApi(
             inputModel,
             completionContext.cwd || '/',
             completionContext.shell || '',
@@ -543,7 +548,15 @@
                 rawValues = Array.isArray(parsed) ? parsed : [];
               } catch (e) {}
               const seen = new Set();
-              const values = rawValues.map(normalizeGhostCandidate).filter(function (value) {
+              const values = rawValues.map(function (item) {
+                if (typeof item === 'string') {
+                  return { command: normalizeGhostCandidate(item), confidence: 60, source: 'history', reason: 'Learned from terminal history' };
+                }
+                const copy = Object.assign({}, item || {});
+                copy.command = normalizeGhostCandidate(copy.command || '');
+                return copy;
+              }).filter(function (item) {
+                const value = String(item.command || '');
                 if (!value || value.length <= inputModel.length) return false;
                 if (inputModel && !value.toLowerCase().startsWith(inputModel.toLowerCase())) return false;
                 const key = value.toLowerCase();
@@ -652,6 +665,10 @@
       }
 
       function requestGhostPrediction() {
+        if (!terminalAI.shadowEnabled) {
+          hideGhost();
+          return;
+        }
         if (suggestionsVisible) requestSuggestions(false);
         if (!inputModelKnown || !inputModel || !bridge || !bridge.predict_command) {
           hideGhost();
@@ -997,6 +1014,15 @@
 
       window.sshdockTerm = {
         write: function (data) { term.write(data); },
+        setTerminalAISettings: function (data) {
+          try {
+            terminalAI.shadowEnabled = data && data.shadowEnabled !== false;
+            terminalAI.suggestionsEnabled = data && data.suggestionsEnabled !== false;
+            if (!terminalAI.shadowEnabled) hideGhost();
+            if (!terminalAI.suggestionsEnabled) hideSuggestions();
+            if (inputModelKnown) requestGhostPrediction();
+          } catch (e) {}
+        },
         setCompletionContext: function (data) {
           try {
             const value = data || {};
