@@ -334,6 +334,39 @@ def _group_shell_history_lines(lines: Iterable[str]) -> list[str]:
     return entries
 
 
+# SSHDock's inline-table commands are control/UI helpers, not useful shell history.
+# Persisted shells usually record the alias the user typed, not its expansion.
+_SSHDOCK_MAGIC_COMMANDS = {
+    "mdocker", "m-docker", "magic-docker",
+    "mdps", "mdpa", "mdimg", "mdvol", "mdnet", "mdstats", "mdcomp",
+    "mdsvc", "mddf", "mdctx", "mdplug", "mdnode", "mdstack", "mdsecret", "mdconfig",
+    "mps", "mpa", "mimages", "mimg", "mvolume", "mvol", "mnetwork", "mnet",
+    "mstats", "mcompose", "mcomp", "mservice", "msvc", "mdf", "msystem",
+    "mcontext", "mplugin", "mnode", "mstack", "msecret", "mconfig",
+}
+_SHELL_COMMAND_WRAPPERS = {"command", "builtin", "env", "exec", "nohup", "sudo", "time"}
+
+def _is_sshdock_internal_command(command: str, words: list[str] | None = None) -> bool:
+    """Reject SSHDock magic aliases, flags, OSC hooks, and bootstrap commands."""
+    value = str(command or "")
+    lowered_value = value.casefold()
+    if any(marker in lowered_value for marker in (
+        "__sshdock_", "sshdock-magic", "sshdock-result", ".cache/sshdock/",
+    )):
+        return True
+
+    tokens = words if words is not None else CommandPredictor._command_parts(value)
+    lowered = [str(token).casefold() for token in tokens]
+    if any(token in {"--magic", "--mdocker"} for token in lowered):
+        return True
+    if any(token.startswith("__sshdock_") or ".cache/sshdock/" in token for token in lowered):
+        return True
+
+    index = 0
+    while index < len(lowered) and lowered[index] in _SHELL_COMMAND_WRAPPERS:
+        index += 1
+    return index < len(lowered) and lowered[index] in _SSHDOCK_MAGIC_COMMANDS
+
 def split_shell_commands(command: str, *, limit: int = 64) -> list[str]:
     """Extract learnable leaf commands without training comments or shell syntax.
 
@@ -343,7 +376,7 @@ def split_shell_commands(command: str, *, limit: int = 64) -> list[str]:
     This is deliberately conservative; it is a learning parser, not a shell.
     """
     safe_input = sanitize_command(command)
-    if safe_input is None:
+    if safe_input is None or _is_sshdock_internal_command(safe_input):
         return []
 
     value = re.sub(r"\\\r?\n[ \t]*", "", safe_input)
@@ -477,7 +510,9 @@ def split_shell_commands(command: str, *, limit: int = 64) -> list[str]:
             continue
         head = words[0].casefold()
         if head in _SHELL_CONTROL_HEADS or head in {"{", "}"} or segment.startswith("("):
-            return []
+            return []        if _is_sshdock_internal_command(segment, words):
+            # Ignore SSHDock UI commands, but keep unrelated safe commands in a chain.
+            continue
 
     commands: list[str] = []
     for segment in segments:
