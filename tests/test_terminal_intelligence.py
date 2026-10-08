@@ -276,5 +276,7 @@ def test_multiline_paste_is_forwarded_to_shell_aware_learner():
 
     assert "value.length > 1 && /[\\r\\n]/.test(value)" in paste_path
     assert "bridge.report_command(value)" in paste_path
-    assert "inputModelKnown = false" in paste_path
+    assert "inputModelKnown = pasteEndsAtCommandBoundary &&" in paste_path
+    assert "pasteContainsShellBlock" in paste_path
+    assert "pasteContainsHereDoc" in paste_path
 
