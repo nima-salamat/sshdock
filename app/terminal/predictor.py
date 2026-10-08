@@ -231,15 +231,93 @@ def _shell_control_stack(value: str) -> list[str]:
     return stack
 
 
+def _here_doc_delimiters(line: str) -> list[str]:
+    """Find shell here-document delimiters outside quoted text and comments."""
+    result: list[str] = []
+    quote: str | None = None
+    escaped = False
+    index = 0
+    while index < len(line):
+        char = line[index]
+        next_char = line[index + 1] if index + 1 < len(line) else ""
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\" and quote != "'":
+                escaped = True
+            elif char == quote:
+                quote = None
+            index += 1
+            continue
+        if char == "#" and (index == 0 or line[index - 1].isspace()):
+            break
+        if char in {"'", '"'}:
+            quote = char
+            index += 1
+            continue
+        if char == "\\":
+            index += 2 if index + 1 < len(line) else 1
+            continue
+        if char == "<" and next_char == "<":
+            third = line[index + 2] if index + 2 < len(line) else ""
+            if third == "<":
+                index += 3
+                continue
+            index += 2
+            if index < len(line) and line[index] == "-":
+                index += 1
+            while index < len(line) and line[index].isspace():
+                index += 1
+            if index >= len(line):
+                continue
+            delimiter_quote = line[index] if line[index] in {"'", '"'} else None
+            if delimiter_quote:
+                index += 1
+                end = line.find(delimiter_quote, index)
+                if end < 0:
+                    result.append(line[index:].strip())
+                    break
+                delimiter = line[index:end]
+                index = end + 1
+            else:
+                start = index
+                while index < len(line) and not line[index].isspace() and line[index] not in ";|&<>":
+                    index += 1
+                delimiter = line[start:index]
+            if delimiter:
+                result.append(delimiter)
+            continue
+        index += 1
+    return result
+
+
 def _group_shell_history_lines(lines: Iterable[str]) -> list[str]:
     """Group physical history lines into complete commands or script blocks."""
     entries: list[str] = []
     pending: list[str] = []
+    heredoc_delimiters: list[str] = []
     for line in lines:
         if not pending and not line.strip():
             continue
-        pending.append(line.rstrip("\r"))
+        clean_line = line.rstrip("\r")
+        pending.append(clean_line)
         joined = "\n".join(pending)
+
+        if not heredoc_delimiters:
+            heredoc_delimiters = _here_doc_delimiters(clean_line)
+        elif clean_line.strip() == heredoc_delimiters[0] or (
+            clean_line.strip().lstrip("\t") == heredoc_delimiters[0]
+        ):
+            heredoc_delimiters.pop(0)
+            if not heredoc_delimiters:
+                # Keep the command and entire body together; the learner will
+                # reject it because the original input contains a here-doc.
+                entries.append(joined)
+                pending.clear()
+            continue
+        if heredoc_delimiters:
+            continue
+
         quote, escaped, paren_depth, brace_depth = _shell_lexical_state(joined)
         control_stack = _shell_control_stack(joined)
         if quote or escaped or paren_depth or brace_depth or control_stack:
