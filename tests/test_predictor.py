@@ -438,3 +438,51 @@ def test_remote_history_parsing_runs_outside_calling_thread(monkeypatch):
     assert snapshot.commands == ("git status",)
     assert parser_threads and parser_threads[0] != caller_thread
 
+
+
+
+def test_shell_learning_excludes_sshdock_magic_commands_and_aliases():
+    from app.terminal.predictor import split_shell_commands
+
+    aliases = (
+        "mdocker ps", "m-docker ps", "magic-docker ps",
+        "mdps", "mdpa", "mdimg", "mdvol", "mdnet", "mdstats",
+        "mdcomp", "mdsvc", "mddf", "mdctx", "mdplug", "mdnode",
+        "mdstack", "mdsecret", "mdconfig", "mps", "mpa", "mimages",
+        "mimg", "mvolume", "mvol", "mnetwork", "mnet", "mstats",
+        "mcompose", "mcomp", "mservice", "msvc", "mdf", "msystem",
+        "mcontext", "mplugin", "mnode", "mstack", "msecret", "mconfig",
+    )
+    for command in aliases:
+        assert split_shell_commands(command) == [], command
+
+    assert split_shell_commands("docker ps --magic") == []
+    assert split_shell_commands("docker --mdocker ps") == []
+    assert split_shell_commands("sudo mdocker ps") == []
+    assert split_shell_commands("__sshdock_magic ps") == []
+    assert split_shell_commands("source $HOME/.cache/sshdock/docker.sh") == []
+
+
+def test_shell_learning_skips_magic_fragments_but_keeps_ordinary_commands():
+    from app.terminal.predictor import split_shell_commands
+
+    assert split_shell_commands(
+        "git status; mdocker ps; docker ps --magic; git log --oneline"
+    ) == ["git status", "git log --oneline"]
+
+
+def test_predictor_never_learns_or_scores_sshdock_magic_commands():
+    predictor = CommandPredictor()
+
+    assert not predictor.add_command("mdocker ps", server_id="magic")
+    assert not predictor.record_suggestion_acceptance(
+        "mdocker ps", server_id="magic"
+    )
+    assert not predictor.record_command_result(
+        "docker ps --magic", success=True, server_id="magic"
+    )
+    assert predictor.add_command(
+        "git status; mdocker ps; docker ps --magic; docker ps",
+        server_id="magic",
+    )
+    assert predictor.history(server_id="magic") == ("git status", "docker ps")
