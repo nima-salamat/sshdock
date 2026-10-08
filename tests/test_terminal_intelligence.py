@@ -275,14 +275,15 @@ def test_live_terminal_cwd_is_pushed_into_prediction_context():
     assert "shell=self.terminal_shells.get(sid, \"\")" in handler
     assert handler.index("term.set_completion_context(") < handler.index("if sid != current:")
 
-def test_multiline_paste_is_forwarded_to_shell_aware_learner():
+def test_multiline_paste_is_not_forwarded_to_learner_before_submission():
     html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
     start = html.index("function observeInput(")
     end = html.index("/* Printable insertion is only unambiguous", start)
     paste_path = html[start:end]
 
     assert "value.length > 1 && /[\\r\\n]/.test(value)" in paste_path
-    assert "bridge.report_command(value)" in paste_path
+    assert "bridge.report_command(value)" not in paste_path
+    assert "Never report multiline paste as a" in paste_path
     assert "inputModelKnown = pasteEndsAtCommandBoundary &&" in paste_path
     assert "pasteContainsShellBlock" in paste_path
     assert "pasteContainsHereDoc" in paste_path
