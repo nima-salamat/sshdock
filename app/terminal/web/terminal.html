@@ -665,11 +665,13 @@
       }
 
       function requestGhostPrediction() {
+        // Refresh an open Ctrl+Space palette when history/context changes even
+        // if the inline ghost-shadow feature is disabled by user preference.
+        if (suggestionsVisible) requestSuggestions(false);
         if (!terminalAI.shadowEnabled) {
           hideGhost();
           return;
         }
-        if (suggestionsVisible) requestSuggestions(false);
         if (!inputModelKnown || !inputModel || !bridge || !bridge.predict_command) {
           hideGhost();
           return;
