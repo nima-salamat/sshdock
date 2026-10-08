@@ -1244,6 +1244,51 @@ class ConnectionDialog(QDialog):
         proxy_layout.addWidget(self.proxy_settings)
         form.addWidget(proxy_card)
 
+        # Terminal intelligence — shared global preference used by terminal sessions.
+        ai_card = QFrame()
+        ai_card.setObjectName("card")
+        ai_layout = QVBoxLayout(ai_card)
+        ai_layout.setContentsMargins(16, 14, 16, 14)
+        ai_layout.setSpacing(7)
+        ai_title = QLabel("Terminal intelligence")
+        ai_title.setObjectName("sectionTitle")
+        ai_layout.addWidget(ai_title)
+        ai_sub = QLabel(
+            "Use a local online-learning command shadow and Ctrl+Space suggestions. "
+            "The model learns from sanitized remote shell history."
+        )
+        ai_sub.setObjectName("formSub")
+        ai_sub.setWordWrap(True)
+        ai_layout.addWidget(ai_sub)
+        saved_ai = self.store.load_ui_prefs() if self.store is not None else {}
+
+        self.ai_shadow_cb = QCheckBox("Show AI command shadow while typing")
+        self.ai_shadow_cb.setChecked(
+            bool(saved_ai.get("terminal_ai_shadow_enabled", True))
+        )
+        self.ai_suggestions_cb = QCheckBox(
+            "Enable Ctrl+Space suggestion palette"
+        )
+        self.ai_suggestions_cb.setChecked(
+            bool(saved_ai.get("terminal_ai_suggestions_enabled", True))
+        )
+        self.ai_history_cb = QCheckBox("Learn from remote shell history")
+        self.ai_history_cb.setChecked(
+            bool(saved_ai.get("terminal_ai_learn_history", True))
+        )
+        self.ai_persist_cb = QCheckBox("Persist learned patterns locally")
+        self.ai_persist_cb.setChecked(
+            bool(saved_ai.get("terminal_ai_persist_learning", True))
+        )
+        for checkbox in (
+            self.ai_shadow_cb,
+            self.ai_suggestions_cb,
+            self.ai_history_cb,
+            self.ai_persist_cb,
+        ):
+            ai_layout.addWidget(checkbox)
+        form.addWidget(ai_card)
+
         # Advanced
         self.adv_toggle = QToolButton()
         self.adv_toggle.setText("▸  Advanced options")
@@ -2020,5 +2065,17 @@ class ConnectionDialog(QDialog):
                 f"Connecting directly to «{host}» "
                 f"(«{alias_text}» was not an SSH config alias)."
             )
+
+        if self.store is not None:
+            try:
+                prefs = self.store.load_ui_prefs()
+                prefs["terminal_ai_shadow_enabled"] = self.ai_shadow_cb.isChecked()
+                prefs["terminal_ai_suggestions_enabled"] = self.ai_suggestions_cb.isChecked()
+                prefs["terminal_ai_learn_history"] = self.ai_history_cb.isChecked()
+                prefs["terminal_ai_persist_learning"] = self.ai_persist_cb.isChecked()
+                prefs["terminal_ai_max_suggestions"] = 5
+                self.store.save_ui_prefs(prefs)
+            except Exception:
+                pass
 
         self.accept()
