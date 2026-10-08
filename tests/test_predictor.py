@@ -360,3 +360,25 @@ def test_shell_control_words_inside_comments_or_quotes_are_not_script_blocks():
     assert split_shell_commands("git status # if true; then") == ["git status"]
     assert split_shell_commands("echo ok; if true; then echo no; fi") == []
 
+def test_predictor_reuses_context_between_prefixes_and_invalidates_when_history_changes():
+    predictor = CommandPredictor()
+    predictor.ingest(
+        ["git status", "docker ps", "git log"],
+        server_id="srv",
+        cwd="/srv/app",
+        shell="/bin/bash",
+    )
+    scope = predictor._scope("srv")
+    first = predictor._build_context(scope, "/srv/app", "bash")
+
+    assert predictor._build_context(scope, "/srv/app", "bash") is first
+    predictor.suggest_ranked(
+        "git", server_id="srv", cwd="/srv/app", shell="bash", limit=5
+    )
+    assert predictor._build_context(scope, "/srv/app", "bash") is first
+
+    predictor.add_command("git diff", server_id="srv", cwd="/srv/app", shell="/bin/bash")
+    refreshed = predictor._build_context(scope, "/srv/app", "bash")
+    assert refreshed is not first
+    assert refreshed["observations"][-1].command == "git diff"
+
