@@ -502,3 +502,35 @@ def test_remote_history_parser_skips_sshdock_magic_aliases():
     )
 
     assert snapshot.commands == ("git status", "docker ps")
+
+
+
+def test_predictor_load_scrubs_legacy_magic_history_and_feedback():
+    predictor = CommandPredictor()
+    legacy_weights = dict(CommandPredictor.DEFAULT_WEIGHTS)
+    legacy_weights["accepted"] = 5.5
+    predictor.load_state_dict({
+        "version": 3,
+        "weights": legacy_weights,
+        "history": {
+            "srv": [
+                {"command": "mdocker ps", "cwd": "/srv", "shell": "/bin/bash"},
+                {"command": "git status", "cwd": "/srv", "shell": "/bin/bash"},
+                {
+                    "command": "source $HOME/.cache/sshdock/docker.sh",
+                    "cwd": "/srv",
+                    "shell": "/bin/bash",
+                },
+            ]
+        },
+        "accepted": {"srv": {"mdocker ps": 4, "git status": 2}},
+        "success": {"srv": {"docker ps --magic": 3}},
+        "failure": {"srv": {"mdps": 1}},
+    })
+
+    state = predictor.state_dict()
+    assert predictor.history(server_id="srv") == ("git status",)
+    assert state["accepted"] == {"srv": {"git status": 2}}
+    assert state["success"] == {}
+    assert state["failure"] == {}
+    assert predictor._weights == CommandPredictor.DEFAULT_WEIGHTS
