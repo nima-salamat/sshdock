@@ -405,7 +405,7 @@ class CommandPredictor:
         # History-backed candidates retain their learned features; starter
         # candidates only contribute prefix/context fit and never get recorded
         # as commands the user actually ran.
-        candidates = dict.fromkeys((*counts.keys(), *self.STARTER_COMMANDS))
+        candidates = dict.fromkeys(counts.keys() if counts else self.STARTER_COMMANDS)
         scored: list[tuple[float, str, dict[str, float]]] = []
 
         for command in candidates:
@@ -614,7 +614,7 @@ class CommandPredictor:
             if shell_norm and (obs.shell or "").split("/")[-1].lower() == shell_norm
         )
 
-        candidates = dict.fromkeys((*counts.keys(), *self.STARTER_COMMANDS))
+        candidates = dict.fromkeys(counts.keys() if counts else self.STARTER_COMMANDS)
         candidates_scored: list[tuple[float, str]] = []
         raw_cf = raw.casefold()
 
