@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QScrollBar
@@ -39,6 +40,7 @@ class _Bridge(QObject):
     def __init__(self):
         super().__init__()
         self.completion_provider = None
+        self.suggestions_provider = None
 
     @Slot(str, str, str, str, result=str)
     def predict_command(self, prefix: str, cwd: str, shell: str, server_id: str) -> str:
@@ -49,6 +51,30 @@ class _Bridge(QObject):
             return str(provider(prefix or "", cwd or "/", shell or "", server_id or "") or "")
         except Exception:
             return ""
+
+    @Slot(str, str, str, str, result=str)
+    def suggest_commands(self, prefix: str, cwd: str, shell: str, server_id: str) -> str:
+        """Return a bounded JSON list for the interactive Ctrl+Space palette."""
+        provider = self.suggestions_provider
+        if provider is None:
+            return "[]"
+        try:
+            result = provider(prefix or "", cwd or "/", shell or "", server_id or "")
+            if isinstance(result, str):
+                result = [result] if result else []
+            values = []
+            seen = set()
+            for item in result or []:
+                value = str(item or "").strip()
+                key = value.casefold()
+                if value and key not in seen:
+                    seen.add(key)
+                    values.append(value)
+                if len(values) >= 5:
+                    break
+            return json.dumps(values, ensure_ascii=False)
+        except Exception:
+            return "[]"
 
     @Slot(str)
     def report_command(self, command: str) -> None:
@@ -258,6 +284,10 @@ class XtermTerminalWidget(QWidget):
     def set_completion_provider(self, provider) -> None:
         """Set the lightweight Python-side predictor used by xterm.js."""
         self._bridge.completion_provider = provider
+
+    def set_suggestions_provider(self, provider) -> None:
+        """Set the provider used by the multi-choice completion popup."""
+        self._bridge.suggestions_provider = provider
 
     def set_completion_context(self, *, server_id: str = "", cwd: str = "/", shell: str = "") -> None:
         import json

@@ -3704,6 +3704,8 @@ class MainWindow(QMainWindow):
         term.setEnabled(False)
         if hasattr(term, "set_completion_provider"):
             term.set_completion_provider(self._predict_terminal_command)
+            if hasattr(term, "set_suggestions_provider"):
+                term.set_suggestions_provider(self._predict_terminal_commands)
             term.set_completion_context(server_id=server_id, cwd="/", shell="")
         try:
             fam = str(prefs.get("terminal_font_family") or "Consolas")
@@ -3814,6 +3816,28 @@ class MainWindow(QMainWindow):
             ),
         )
         return str(value or "")
+
+    def _predict_terminal_commands(self, prefix: str, cwd: str, shell: str, server_id: str) -> list[str]:
+        """Return up to five context-ranked suggestions for the Ctrl+Space palette."""
+        sid = server_id or self.terminal_server_ids.get(
+            self.terminal_picker.currentData() if getattr(self, "terminal_picker", None) else "",
+            self.current_id or "",
+        )
+        effective_shell = shell or self.terminal_shells.get(
+            self.terminal_picker.currentData() if getattr(self, "terminal_picker", None) else "",
+            "",
+        )
+        value = self._command_predictor.suggest(
+            prefix,
+            server_id=sid or "",
+            cwd=cwd or "/",
+            shell=effective_shell,
+            limit=5,
+            min_score=1.0,
+        )
+        if isinstance(value, list):
+            return value[:5]
+        return [value] if isinstance(value, str) and value else []
 
     async def _load_terminal_predictor_history(self, sid: str, ssh, server_id: str, term) -> None:
         try:

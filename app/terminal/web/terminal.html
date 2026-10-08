@@ -173,11 +173,74 @@
     #sshdock-ghost .ghost-gap { display:inline-block; height:1em; vertical-align:top; }
     #sshdock-ghost.light { color: rgba(71, 85, 105, 0.68); }
 
+    /* Explicit command palette for Ctrl+Space; it is independent of shell output. */
+    #sshdock-suggestions {
+      position: absolute; z-index: 80; display: none; box-sizing: border-box;
+      width: 420px; max-width: calc(100% - 24px); overflow: hidden;
+      color: #e6edf3; background: rgba(12, 18, 27, 0.98);
+      border: 1px solid #344255; border-radius: 8px;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.42);
+      font-family: Cascadia Mono, Consolas, Menlo, monospace;
+      font-size: 12px; line-height: 1.4; pointer-events: auto;
+    }
+    #sshdock-suggestions.visible { display: block; }
+    #sshdock-suggestions .suggestion-heading {
+      display: flex; justify-content: space-between; gap: 12px;
+      padding: 7px 10px; color: #9aa9bb; background: #131d2a;
+      border-bottom: 1px solid #273446;
+      font-family: system-ui, sans-serif; font-size: 11px;
+      font-weight: 650; letter-spacing: .02em;
+    }
+    #sshdock-suggestions .suggestion-heading .count { color: #6f839b; font-weight: 500; }
+    #sshdock-suggestions .suggestion-row {
+      display: flex; align-items: center; gap: 9px; min-width: 0;
+      padding: 7px 10px; border-bottom: 1px solid rgba(47, 61, 79, 0.5);
+      cursor: pointer;
+    }
+    #sshdock-suggestions .suggestion-row:last-of-type { border-bottom: 0; }
+    #sshdock-suggestions .suggestion-row:hover,
+    #sshdock-suggestions .suggestion-row.active { background: #1b3048; }
+    #sshdock-suggestions .suggestion-index {
+      flex: 0 0 20px; width: 20px; height: 20px; display: inline-flex;
+      align-items: center; justify-content: center; box-sizing: border-box;
+      color: #9db8d8; background: #1a2635; border: 1px solid #34475e;
+      border-radius: 4px; font-size: 10px;
+    }
+    #sshdock-suggestions .suggestion-command {
+      flex: 1 1 auto; min-width: 0; white-space: pre; overflow: hidden;
+      text-overflow: ellipsis; color: #e6edf3;
+    }
+    #sshdock-suggestions .suggestion-row.active .suggestion-command { color: #8ac7ff; }
+    #sshdock-suggestions .suggestion-empty {
+      padding: 12px; color: #9aa9bb; font-family: system-ui, sans-serif;
+    }
+    #sshdock-suggestions .suggestion-footer {
+      padding: 6px 10px; color: #8494a8; background: #0e151f;
+      border-top: 1px solid #273446; font-family: system-ui, sans-serif; font-size: 10px;
+    }
+    #sshdock-suggestions.light {
+      color: #1f2933; background: rgba(255, 255, 255, 0.98);
+      border-color: #cbd5e1; box-shadow: 0 12px 30px rgba(30, 41, 59, 0.2);
+    }
+    #sshdock-suggestions.light .suggestion-heading { color: #526273; background: #f1f5f9; border-color: #dbe3ec; }
+    #sshdock-suggestions.light .suggestion-heading .count { color: #748296; }
+    #sshdock-suggestions.light .suggestion-row { border-color: #edf1f6; }
+    #sshdock-suggestions.light .suggestion-row:hover,
+    #sshdock-suggestions.light .suggestion-row.active { background: #eaf2ff; }
+    #sshdock-suggestions.light .suggestion-index { color: #3b5f8c; background: #f3f7fc; border-color: #cbd9eb; }
+    #sshdock-suggestions.light .suggestion-command { color: #1f2933; }
+    #sshdock-suggestions.light .suggestion-row.active .suggestion-command { color: #1759a6; }
+    #sshdock-suggestions.light .suggestion-empty { color: #526273; }
+    #sshdock-suggestions.light .suggestion-footer { color: #66758a; background: #f8fafc; border-color: #dbe3ec; }
+
   </style>
 </head>
 <body>
   <div id="term-root">
-    <div id="terminal"><div id="sshdock-ghost" aria-hidden="true"></div></div>
+    <div id="terminal">
+      <div id="sshdock-ghost" aria-hidden="true"></div>
+      <div id="sshdock-suggestions" role="listbox" aria-label="Command suggestions"></div>
+    </div>
   </div>
 
 <script src="vendor/xterm.js"></script>
@@ -245,6 +308,9 @@
 
       const ghost = document.getElementById('sshdock-ghost') || document.createElement('div');
       if (!ghost.parentNode) terminalHost.appendChild(ghost);
+      const suggestionPopup = document.getElementById('sshdock-suggestions') || document.createElement('div');
+      if (!suggestionPopup.parentNode) terminalHost.appendChild(suggestionPopup);
+      suggestionPopup.addEventListener('pointerdown', function (ev) { ev.preventDefault(); });
 
       const completionContext = {
         serverId: '',
@@ -257,12 +323,176 @@
       let ghostAnchorX = null;
       let inputModel = '';
       let inputModelKnown = true;
+      let suggestionRequestSeq = 0;
+      let suggestions = [];
+      let selectedSuggestion = 0;
+      let suggestionsVisible = false;
 
       function hideGhost() {
         ghostCandidate = '';
         ghostSuffix = '';
         ghost.classList.remove('visible');
         ghost.textContent = '';
+      }
+
+      function hideSuggestions() {
+        suggestionRequestSeq += 1;
+        suggestionsVisible = false;
+        suggestions = [];
+        selectedSuggestion = 0;
+        suggestionPopup.classList.remove('visible');
+        suggestionPopup.style.display = 'none';
+        suggestionPopup.textContent = '';
+      }
+
+      function positionSuggestions() {
+        if (!suggestionsVisible) return;
+        const buf = term.buffer && term.buffer.active;
+        if (!buf || buf.type === 'alternate') { hideSuggestions(); return; }
+        const dims = cellMetrics();
+        const actualCursorX = Math.max(0, Number(buf.cursorX) || 0);
+        const cursorX = Math.max(actualCursorX, ghostAnchorX == null ? 0 : ghostAnchorX);
+        const cursorY = Math.max(0, Number(buf.cursorY) || 0);
+        const screen = term.element && term.element.querySelector
+          ? term.element.querySelector('.xterm-screen') : null;
+        const hostRect = terminalHost.getBoundingClientRect();
+        const screenRect = screen ? screen.getBoundingClientRect() : null;
+        const originLeft = screenRect ? screenRect.left - hostRect.left : 4;
+        const originTop = screenRect ? screenRect.top - hostRect.top : 4;
+        const maxWidth = Math.max(180, Math.min(520, terminalHost.clientWidth - 24));
+        suggestionPopup.style.width = maxWidth + 'px';
+        suggestionPopup.style.maxWidth = Math.max(120, terminalHost.clientWidth - 24) + 'px';
+        suggestionPopup.style.display = 'block';
+        const effectiveWidth = Math.min(maxWidth, terminalHost.clientWidth - 8);
+        const left = Math.max(4, Math.min(
+          terminalHost.clientWidth - effectiveWidth - 4,
+          originLeft + cursorX * dims.width
+        ));
+        let top = originTop + (cursorY + 1) * dims.height + 4;
+        const popupHeight = suggestionPopup.offsetHeight || 180;
+        if (top + popupHeight > terminalHost.clientHeight - 4)
+          top = Math.max(4, originTop + cursorY * dims.height - popupHeight - 4);
+        top = Math.max(4, Math.min(top, Math.max(4, terminalHost.clientHeight - popupHeight - 4)));
+        suggestionPopup.style.left = left + 'px';
+        suggestionPopup.style.top = top + 'px';
+      }
+
+      function renderSuggestions(values, emptyMessage) {
+        suggestions = (values || []).slice(0, 5);
+        selectedSuggestion = Math.max(0, Math.min(selectedSuggestion, Math.max(0, suggestions.length - 1)));
+        suggestionPopup.textContent = '';
+
+        const heading = document.createElement('div');
+        heading.className = 'suggestion-heading';
+        const title = document.createElement('span');
+        title.textContent = 'Command suggestions';
+        const count = document.createElement('span');
+        count.className = 'count';
+        count.textContent = suggestions.length ? suggestions.length + ' found' : 'No matches';
+        heading.appendChild(title);
+        heading.appendChild(count);
+        suggestionPopup.appendChild(heading);
+
+        if (!suggestions.length) {
+          const empty = document.createElement('div');
+          empty.className = 'suggestion-empty';
+          empty.textContent = emptyMessage || 'No matching commands in this server’s learned history yet.';
+          suggestionPopup.appendChild(empty);
+        } else {
+          suggestions.forEach(function (command, index) {
+            const row = document.createElement('div');
+            row.className = 'suggestion-row' + (index === selectedSuggestion ? ' active' : '');
+            row.setAttribute('role', 'option');
+            row.setAttribute('aria-selected', index === selectedSuggestion ? 'true' : 'false');
+            const number = document.createElement('span');
+            number.className = 'suggestion-index';
+            number.textContent = String(index + 1);
+            const value = document.createElement('span');
+            value.className = 'suggestion-command';
+            value.textContent = command;
+            row.appendChild(number);
+            row.appendChild(value);
+            row.addEventListener('mouseenter', function () {
+              selectedSuggestion = index;
+              updateSuggestionSelection();
+            });
+            row.addEventListener('click', function () { acceptSuggestion(index); });
+            suggestionPopup.appendChild(row);
+          });
+        }
+
+        const footer = document.createElement('div');
+        footer.className = 'suggestion-footer';
+        footer.textContent = suggestions.length
+          ? '↑ ↓ Select   ·   Enter / Tab Insert   ·   Esc Close'
+          : 'Esc Close   ·   Keep typing to refine';
+        suggestionPopup.appendChild(footer);
+        suggestionsVisible = true;
+        suggestionPopup.classList.add('visible');
+        positionSuggestions();
+      }
+
+      function updateSuggestionSelection() {
+        const rows = suggestionPopup.querySelectorAll('.suggestion-row');
+        rows.forEach(function (row, index) {
+          const active = index === selectedSuggestion;
+          row.classList.toggle('active', active);
+          row.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+      }
+
+      function acceptSuggestion(index) {
+        if (!suggestionsVisible || index < 0 || index >= suggestions.length) return false;
+        const candidate = normalizeGhostCandidate(suggestions[index]);
+        if (inputModel && !candidate.toLowerCase().startsWith(inputModel.toLowerCase())) return false;
+        const suffix = candidate.slice(inputModel.length);
+        if (suffix) sendInput(suffix);
+        inputModel = candidate;
+        inputModelKnown = true;
+        ghostAnchorX = null;
+        hideSuggestions();
+        hideGhost();
+        term.focus();
+        return true;
+      }
+
+      function requestSuggestions(forceOpen) {
+        if (!forceOpen && !suggestionsVisible) return;
+        if (!inputModelKnown || !bridge || !bridge.suggest_commands) {
+          if (forceOpen) renderSuggestions([], 'This command line is not in a safe-to-complete state. Press Esc, then type a new command.');
+          else hideSuggestions();
+          return;
+        }
+        const seq = ++suggestionRequestSeq;
+        try {
+          bridge.suggest_commands(
+            inputModel,
+            completionContext.cwd || '/',
+            completionContext.shell || '',
+            completionContext.serverId || '',
+            function (payload) {
+              if (seq !== suggestionRequestSeq || (!forceOpen && !suggestionsVisible)) return;
+              let rawValues = [];
+              try {
+                const parsed = JSON.parse(String(payload || '[]'));
+                rawValues = Array.isArray(parsed) ? parsed : [];
+              } catch (e) {}
+              const seen = new Set();
+              const values = rawValues.map(normalizeGhostCandidate).filter(function (value) {
+                if (!value || value.length <= inputModel.length) return false;
+                if (inputModel && !value.toLowerCase().startsWith(inputModel.toLowerCase())) return false;
+                const key = value.toLowerCase();
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+              }).slice(0, 5);
+              renderSuggestions(values);
+            }
+          );
+        } catch (e) {
+          if (forceOpen) renderSuggestions([], 'Could not load command suggestions.');
+          else hideSuggestions();
+        }
       }
 
       function cellMetrics() {
@@ -357,6 +587,7 @@
       }
 
       function requestGhostPrediction() {
+        if (suggestionsVisible) requestSuggestions(false);
         if (!inputModelKnown || !inputModel || !bridge || !bridge.predict_command) {
           hideGhost();
           return;
@@ -487,7 +718,9 @@
       }
 
       function updateCompletionTheme(theme) {
-        ghost.classList.toggle('light', !!(theme && theme.background && String(theme.background).toLowerCase() !== '#080d13'));
+        const isLight = !!(theme && theme.background && String(theme.background).toLowerCase() !== '#080d13');
+        ghost.classList.toggle('light', isLight);
+        suggestionPopup.classList.toggle('light', isLight);
       }
 
       // PySide6 owns the visible scrollbar. Report xterm's logical scroll
@@ -636,6 +869,35 @@
 
       // API for Python
       term.attachCustomKeyEventHandler(function (ev) {
+        if (ev.type === 'keydown' && ev.ctrlKey && !ev.altKey && (ev.key === ' ' || ev.code === 'Space')) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          requestSuggestions(true);
+          return false;
+        }
+        if (ev.type === 'keydown' && suggestionsVisible && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          if (suggestions.length) {
+            const delta = ev.key === 'ArrowDown' ? 1 : -1;
+            selectedSuggestion = (selectedSuggestion + delta + suggestions.length) % suggestions.length;
+            updateSuggestionSelection();
+          }
+          return false;
+        }
+        if (ev.type === 'keydown' && suggestionsVisible && (ev.key === 'Enter' || ev.key === 'Tab')) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          if (suggestions.length) acceptSuggestion(selectedSuggestion);
+          else hideSuggestions();
+          return false;
+        }
+        if (ev.type === 'keydown' && suggestionsVisible && ev.key === 'Escape') {
+          ev.preventDefault();
+          ev.stopPropagation();
+          hideSuggestions();
+          return false;
+        }
         if (ev.type === 'keydown' && ev.ctrlKey && ev.shiftKey && (ev.key === 'F' || ev.code === 'KeyF')) {
           if (bridge && bridge.request_find) bridge.request_find();
           return false;
@@ -654,6 +916,7 @@
           return false;
         }
         if (ev.type === 'keydown' && ev.key === 'Escape') {
+          hideSuggestions();
           hideGhost();
         }
         if (ev.type === 'keydown' && (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight' || ev.key === 'Delete')) {
@@ -684,7 +947,7 @@
           try { updateCompletionTheme(theme || {}); } catch (e) {}
           try { if (theme) term.options.theme = theme; } catch (e) {}
         },
-        clear: function () { term.clear(); term.write('\x1b[H\x1b[2J'); },
+        clear: function () { hideSuggestions(); hideGhost(); term.clear(); term.write('\x1b[H\x1b[2J'); },
         focus: function () { term.focus(); },
         scrollToLine: function (line) {
           const target = Math.max(0, Math.round(Number(line) || 0));

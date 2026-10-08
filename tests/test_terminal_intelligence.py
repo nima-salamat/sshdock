@@ -134,3 +134,74 @@ def test_main_window_wires_predictor_and_remote_history():
     assert "set_completion_provider" in src
     assert "_load_terminal_predictor_history" in src
     assert "_terminal_command_submitted" in src
+
+
+
+def test_predictor_returns_five_context_ranked_suggestions_including_empty_prompt():
+    predictor = CommandPredictor()
+    predictor.ingest(
+        [
+            "docker ps",
+            "docker images",
+            "docker ps",
+            "docker compose ps",
+            "docker logs web",
+            "docker inspect web",
+            "docker stats",
+        ],
+        server_id="server",
+        cwd="/srv/app",
+        shell="/bin/bash",
+    )
+
+    prefix_results = predictor.suggest(
+        "docker",
+        server_id="server",
+        cwd="/srv/app",
+        shell="bash",
+        limit=5,
+    )
+    empty_results = predictor.suggest(
+        "",
+        server_id="server",
+        cwd="/srv/app",
+        shell="bash",
+        limit=5,
+    )
+
+    assert isinstance(prefix_results, list)
+    assert 1 <= len(prefix_results) <= 5
+    assert all(command.startswith("docker") for command in prefix_results)
+    assert isinstance(empty_results, list)
+    assert 1 <= len(empty_results) <= 5
+    assert len({command.casefold() for command in empty_results}) == len(empty_results)
+
+
+def test_bridge_returns_at_most_five_json_suggestions():
+    import json
+    from app.terminal.web_widget import _Bridge
+
+    bridge = _Bridge()
+    bridge.suggestions_provider = lambda *args: [
+        "git status", "git log", "git diff", "git pull", "git push", "git branch"
+    ]
+
+    result = json.loads(bridge.suggest_commands("git", "/", "bash", "server"))
+
+    assert result == ["git status", "git log", "git diff", "git pull", "git push"]
+
+
+def test_terminal_popup_is_keyboard_operable_and_uses_predictor():
+    html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    widget = (ROOT / "app/terminal/web_widget.py").read_text(encoding="utf-8")
+    main = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
+
+    assert 'id="sshdock-suggestions"' in html
+    assert "bridge.suggest_commands" in html
+    assert "ev.code === 'Space'" in html
+    assert "suggestionsVisible && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')" in html
+    assert "suggestionsVisible && (ev.key === 'Enter' || ev.key === 'Tab')" in html
+    assert "function acceptSuggestion(index)" in html
+    assert "def set_suggestions_provider" in widget
+    assert "def _predict_terminal_commands" in main
+    assert "limit=5" in main

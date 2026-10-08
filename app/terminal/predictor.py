@@ -161,8 +161,9 @@ class CommandPredictor:
     ) -> str | list[str] | None:
         """Suggest the best command(s) starting with the current editable prefix."""
         raw = prefix or ""
-        if not raw.strip():
-            return [] if limit != 1 else None
+        empty_prefix = not raw.strip()
+        if empty_prefix and limit == 1:
+            return None
 
         scope = self._scope(server_id)
         counts = self._counts[scope]
@@ -179,7 +180,7 @@ class CommandPredictor:
 
         for command, count in counts.items():
             candidate = normalize_prediction(command)
-            if not candidate.casefold().startswith(raw_cf):
+            if not empty_prefix and not candidate.casefold().startswith(raw_cf):
                 continue
             if len(candidate) <= len(raw):
                 continue
@@ -193,7 +194,7 @@ class CommandPredictor:
 
             if previous:
                 transition_count = self._transitions[scope].get((previous, command), 0)
-                score += min(6.0, transition_count * 2.0)
+                score += min(8.0, math.log2(transition_count + 1) * 2.5)
 
             if current_parts:
                 try:
@@ -203,18 +204,21 @@ class CommandPredictor:
                 if candidate_parts and candidate_parts[: len(current_parts)] == list(current_parts):
                     score += 3.0
 
-            if any(
-                obs.command == command and (obs.cwd or "/") == cwd_norm
-                for obs in self._history[scope]
-            ):
-                score += 2.0
+            observations = self._history[scope]
+            cwd_hits = sum(
+                1 for obs in observations
+                if obs.command == command and (obs.cwd or "/") == cwd_norm
+            )
+            if cwd_hits:
+                score += min(5.0, 2.0 + math.log2(cwd_hits + 1))
 
-            if shell_norm and any(
-                obs.command == command
+            shell_hits = sum(
+                1 for obs in observations
+                if obs.command == command
                 and (obs.shell or "").split("/")[-1].lower() == shell_norm
-                for obs in self._history[scope]
-            ):
-                score += 1.0
+            ) if shell_norm else 0
+            if shell_hits:
+                score += min(3.0, 1.0 + math.log2(shell_hits + 1))
 
             candidates.append((score, candidate))
 
