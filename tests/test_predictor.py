@@ -276,6 +276,11 @@ def test_shell_learning_ignores_comments_and_splits_pasted_commands():
     ) == ["git status", "docker ps", "git log --oneline"]
     assert split_shell_commands("echo value#tag") == ["echo value#tag"]
     assert split_shell_commands("git log " + chr(92)) == []
+    assert split_shell_commands("git status &&") == []
+    assert split_shell_commands("cat |") == []
+    assert split_shell_commands("cat <<< 'inline input'") == [
+        "cat <<< 'inline input'"
+    ]
     assert split_shell_commands("function helper() { echo no; }") == []
 
 
