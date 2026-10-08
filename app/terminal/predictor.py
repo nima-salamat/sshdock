@@ -6,6 +6,7 @@ All remote history is sanitized before it reaches this module.
 """
 from __future__ import annotations
 
+import asyncio
 from collections import Counter, OrderedDict, defaultdict, deque
 import hashlib
 import json
@@ -598,6 +599,7 @@ class CommandPredictor:
         self._success: dict[str, Counter[str]] = defaultdict(Counter)
         self._failure: dict[str, Counter[str]] = defaultdict(Counter)
         self._snapshot_fingerprints: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=32))
+        self._snapshot_ingest_pending: dict[str, set[str]] = defaultdict(set)
         self._weights: dict[str, float] = dict(self.DEFAULT_WEIGHTS)
         self._clock = 0
         # Context depends on history, cwd and shell, not the typed prefix.
@@ -667,14 +669,24 @@ class CommandPredictor:
                 added += 1
         return added
 
-    def ingest_snapshot(self, snapshot: HistorySnapshot, *, server_id: str = "") -> int:
+    def prepare_snapshot_ingest(
+        self, snapshot: HistorySnapshot, *, server_id: str = ""
+    ) -> tuple[tuple[str, ...], str] | None:
+        """Prepare a sanitized history snapshot without mutating learned history.
+
+        The caller can ingest the returned commands in small batches and yield
+        between batches so large remote histories never monopolize the UI loop.
+        A fingerprint is reserved until :meth:`finish_snapshot_ingest` is called
+        to prevent duplicate concurrent terminal opens from importing it twice.
+        """
         commands = tuple(
             normalize_prediction(command)
             for command in snapshot.commands
             if sanitize_command(command)
         )
         if not commands:
-            return 0
+            return None
+
         scope = self._scope(server_id)
         payload = json.dumps(
             {"shell": snapshot.shell or "", "commands": commands},
@@ -682,19 +694,47 @@ class CommandPredictor:
             separators=(",", ":"),
         ).encode("utf-8")
         fingerprint = hashlib.sha256(payload).hexdigest()
-        fingerprints = self._snapshot_fingerprints[scope]
-        if fingerprint in fingerprints:
+        if (
+            fingerprint in self._snapshot_fingerprints[scope]
+            or fingerprint in self._snapshot_ingest_pending[scope]
+        ):
+            return None
+
+        self._snapshot_ingest_pending[scope].add(fingerprint)
+        return commands, fingerprint
+
+    def finish_snapshot_ingest(
+        self, fingerprint: str, *, server_id: str = "", completed: bool
+    ) -> None:
+        """Release a pending snapshot and remember it only after full ingestion."""
+        if not fingerprint:
+            return
+        scope = self._scope(server_id)
+        self._snapshot_ingest_pending[scope].discard(fingerprint)
+        if completed and fingerprint not in self._snapshot_fingerprints[scope]:
+            self._snapshot_fingerprints[scope].append(fingerprint)
+
+    def ingest_snapshot(self, snapshot: HistorySnapshot, *, server_id: str = "") -> int:
+        prepared = self.prepare_snapshot_ingest(snapshot, server_id=server_id)
+        if prepared is None:
             return 0
-        fingerprints.append(fingerprint)
-        # Shell history files do not carry a reliable cwd for every line.
-        # Keep that context unknown rather than falsely attributing all history
-        # to "/" and training misleading directory affinities.
-        return self.ingest(
-            commands,
-            server_id=server_id,
-            cwd="",
-            shell=snapshot.shell,
-        )
+        commands, fingerprint = prepared
+        completed = False
+        try:
+            # Shell history files do not carry reliable cwd data. Keep it
+            # unknown rather than teaching a misleading "/" affinity.
+            added = self.ingest(
+                commands,
+                server_id=server_id,
+                cwd="",
+                shell=snapshot.shell,
+            )
+            completed = True
+            return added
+        finally:
+            self.finish_snapshot_ingest(
+                fingerprint, server_id=server_id, completed=completed
+            )
 
     def history(self, *, server_id: str = "") -> tuple[str, ...]:
         return tuple(obs.command for obs in self._history[self._scope(server_id)])
@@ -925,6 +965,7 @@ class CommandPredictor:
         self._success.clear()
         self._failure.clear()
         self._snapshot_fingerprints.clear()
+        self._snapshot_ingest_pending.clear()
         self._weights = dict(self.DEFAULT_WEIGHTS)
         self._clock = 0
         self._context_cache.clear()
@@ -1416,4 +1457,8 @@ async def load_remote_history(ssh) -> HistorySnapshot:
     if getattr(result, "exit_code", 0) != 0 and not getattr(result, "stdout", ""):
         return HistorySnapshot(())
 
-    return parse_history_output(getattr(result, "stdout", "") or "")
+    # The shell history may contain hundreds of multiline entries. Parsing and
+    # shell-aware splitting are CPU work; keep it off the Qt/qasync UI thread.
+    return await asyncio.to_thread(
+        parse_history_output, getattr(result, "stdout", "") or ""
+    )
