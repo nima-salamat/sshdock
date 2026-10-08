@@ -254,10 +254,13 @@ def test_open_suggestion_palette_refreshes_when_terminal_context_changes():
     end = html.index("function setInputModel(", start)
     prediction = html[start:end]
 
-    # Ctrl+Space remains live when the remote-history task completes, including
-    # the valid configuration where only the popup is enabled.
-    assert prediction.index("if (suggestionsVisible) requestSuggestions(false);") < prediction.index(
-        "if (!terminalAI.shadowEnabled)"
+    # The palette refreshes itself while open, and inline shadow ranking is
+    # skipped so one keystroke does not trigger duplicate Python ranking calls.
+    assert "if (suggestionsVisible) {" in prediction
+    assert "requestSuggestions(false);" in prediction
+    assert "hideGhost();" in prediction
+    assert prediction.index("if (suggestionsVisible) {") < prediction.index(
+        "if (ghostPredictionTimer !== null)"
     )
     assert "if (inputModelKnown) requestGhostPrediction(true);" in html
 
