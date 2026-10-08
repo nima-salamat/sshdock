@@ -78,6 +78,179 @@ _SHELL_CONTROL_HEADS = {
 }
 
 
+
+
+def _shell_lexical_state(value: str) -> tuple[str | None, bool, int, int]:
+    """Return open quote, trailing escape, and open nesting at end of shell text."""
+    quote: str | None = None
+    escaped = False
+    comment = False
+    paren_depth = 0
+    brace_depth = 0
+    index = 0
+    while index < len(value):
+        char = value[index]
+        next_char = value[index + 1] if index + 1 < len(value) else ""
+        if comment:
+            if char == "\n":
+                comment = False
+            index += 1
+            continue
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\" and quote != "'":
+                escaped = True
+            elif char == quote:
+                quote = None
+            index += 1
+            continue
+        if char == "#" and (index == 0 or value[index - 1].isspace()):
+            comment = True
+            index += 1
+            continue
+        if char in {"'", '"'} or char == chr(96):
+            quote = char
+            index += 1
+            continue
+        if char == "\\":
+            if next_char:
+                if next_char == "\n":
+                    index += 2
+                    while index < len(value) and value[index] in " \t":
+                        index += 1
+                else:
+                    index += 2
+            else:
+                escaped = True
+                index += 1
+            continue
+        if char == "(":
+            paren_depth += 1
+        elif char == ")" and paren_depth:
+            paren_depth -= 1
+        elif char == "{":
+            brace_depth += 1
+        elif char == "}" and brace_depth:
+            brace_depth -= 1
+        index += 1
+    return quote, escaped, paren_depth, brace_depth
+
+
+def _shell_control_heads(value: str) -> list[str]:
+    """Find reserved control words only where a shell command can start."""
+    found: list[str] = []
+    word: list[str] = []
+    quote: str | None = None
+    escaped = False
+    comment = False
+    command_start = True
+    index = 0
+
+    def finish_word() -> None:
+        nonlocal command_start
+        if not word:
+            return
+        token = "".join(word).casefold()
+        word.clear()
+        if command_start and (token in _SHELL_CONTROL_HEADS or token in {"{", "}"}):
+            found.append(token)
+        command_start = False
+
+    while index < len(value):
+        char = value[index]
+        if comment:
+            if char == "\n":
+                comment = False
+                finish_word()
+                command_start = True
+            index += 1
+            continue
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\" and quote != "'":
+                escaped = True
+            elif char == quote:
+                quote = None
+            index += 1
+            continue
+        if char == "#" and (index == 0 or value[index - 1].isspace()):
+            finish_word()
+            comment = True
+            index += 1
+            continue
+        if char in {"'", '"'} or char == chr(96):
+            finish_word()
+            if command_start:
+                command_start = False
+            quote = char
+            index += 1
+            continue
+        if char == "\\":
+            finish_word()
+            command_start = False
+            index += 2 if index + 1 < len(value) else 1
+            continue
+        if char.isspace():
+            finish_word()
+            if char == "\n":
+                command_start = True
+            index += 1
+            continue
+        if char in ";|&()":
+            finish_word()
+            command_start = True
+            if char in "&|" and index + 1 < len(value) and value[index + 1] == char:
+                index += 2
+            else:
+                index += 1
+            continue
+        word.append(char)
+        index += 1
+    finish_word()
+    return found
+
+
+def _shell_control_stack(value: str) -> list[str]:
+    stack: list[str] = []
+    for token in _shell_control_heads(value):
+        if token == "if":
+            stack.append("fi")
+        elif token in {"for", "while", "until", "select"}:
+            stack.append("done")
+        elif token == "case":
+            stack.append("esac")
+        elif token == "function":
+            stack.append("}")
+        elif token == "{" and (not stack or stack[-1] != "}"):
+            stack.append("}")
+        elif token in {"fi", "done", "esac", "}"}:
+            if stack and stack[-1] == token:
+                stack.pop()
+    return stack
+
+
+def _group_shell_history_lines(lines: Iterable[str]) -> list[str]:
+    """Group physical history lines into complete commands or script blocks."""
+    entries: list[str] = []
+    pending: list[str] = []
+    for line in lines:
+        if not pending and not line.strip():
+            continue
+        pending.append(line.rstrip("\r"))
+        joined = "\n".join(pending)
+        quote, escaped, paren_depth, brace_depth = _shell_lexical_state(joined)
+        control_stack = _shell_control_stack(joined)
+        if quote or escaped or paren_depth or brace_depth or control_stack:
+            continue
+        entries.append(joined)
+        pending.clear()
+    if pending:
+        entries.append("\n".join(pending))
+    return entries
+
+
 def split_shell_commands(command: str, *, limit: int = 64) -> list[str]:
     """Extract learnable leaf commands without training comments or shell syntax.
 
@@ -1044,23 +1217,19 @@ class CommandPredictor:
 
 
 def parse_history_output(output: str) -> HistorySnapshot:
-    """Parse bash/zsh/fish history and keep only the detected shell's history."""
-    commands: list[str] = []
+    """Parse bash/zsh/fish history into safe, learnable command fragments."""
     shell = ""
     source = ""
     wanted_source = ""
+    sections: dict[str, list[str]] = {"bash": [], "zsh": [], "fish": []}
 
     for raw in (output or "").splitlines():
         stripped = raw.strip()
-        if not stripped:
-            continue
-
         if stripped.startswith("__SSHDock_SHELL__"):
             shell = stripped.split("=", 1)[-1].strip()
             shell_name = shell.rsplit("/", 1)[-1].lower()
-            wanted_source = shell_name if shell_name in {"bash", "zsh", "fish"} else ""
+            wanted_source = shell_name if shell_name in sections else ""
             continue
-
         if stripped == "__BASH__":
             source = "bash"
             continue
@@ -1070,23 +1239,45 @@ def parse_history_output(output: str) -> HistorySnapshot:
         if stripped == "__FISH__":
             source = "fish"
             continue
+        if source in sections:
+            sections[source].append(raw)
 
-        if wanted_source and source != wanted_source:
-            continue
+    if wanted_source == "fish":
+        candidates = []
+        for raw in sections["fish"]:
+            stripped = raw.strip()
+            if stripped.startswith("- cmd:"):
+                candidates.append(stripped.split(":", 1)[1].strip())
+    elif wanted_source == "zsh":
+        # Extended zsh history starts every entry with colon, timestamp and duration.
+        # Physical lines before the next timestamp belong to the current command.
+        zsh_entries: list[str] = []
+        pending: list[str] = []
+        marker = re.compile(r"^\s*:\s*\d+:\d+;")
+        for raw in sections["zsh"]:
+            match = marker.match(raw)
+            if match:
+                if pending:
+                    zsh_entries.append("\n".join(pending))
+                pending = [raw[match.end():]]
+            elif pending:
+                pending.append(raw)
+        if pending:
+            zsh_entries.append("\n".join(pending))
+        candidates = []
+        for entry in zsh_entries:
+            candidates.extend(_group_shell_history_lines(entry.splitlines()))
+    elif wanted_source == "bash":
+        candidates = _group_shell_history_lines(sections["bash"])
+    else:
+        # Unsupported shells: don't mix unrelated history formats.
+        candidates = []
 
-        if source == "fish":
-            if not stripped.startswith("- cmd:"):
-                continue
-            line = stripped.split(":", 1)[1].strip()
-        elif stripped.startswith(": ") and ";" in stripped:
-            line = stripped.split(";", 1)[1].strip()
-        else:
-            line = stripped
-
-        safe = sanitize_command(line)
-        if safe is not None:
-            commands.append(safe)
-
+    commands: list[str] = []
+    for candidate in candidates:
+        commands.extend(split_shell_commands(candidate, limit=1200 - len(commands)))
+        if len(commands) >= 1200:
+            break
     return HistorySnapshot(tuple(commands[-1200:]), shell=shell)
 
 
