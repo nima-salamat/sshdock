@@ -2216,6 +2216,23 @@ class MainWindow(QMainWindow):
             pass
         self.statusBar().showMessage("Terminal AI learning model reset.", 3500)
 
+    def _reset_terminal_learning(self) -> None:
+        reply = QMessageBox.question(
+            self,
+            "Reset terminal model",
+            "Forget learned terminal history, accepted suggestions and ranking weights?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self._command_predictor.clear()
+        try:
+            self.store.clear_terminal_learning_state()
+        except Exception:
+            pass
+        self.statusBar().showMessage("Terminal AI learning model reset.", 3500)
+
     def _ui_icon_color(self, role: str = "normal", theme: str | None = None) -> str:
         name = str(theme or self.store.load_ui_prefs().get("theme") or "dark").lower()
         if role == "danger":
