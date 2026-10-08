@@ -4117,15 +4117,24 @@ class MainWindow(QMainWindow):
         self._persist_terminal_predictor()
 
     def _terminal_cwd_changed(self, sid: str, path: str):
-        """Shell → explorer: keep session.cwd and live-sync the visible explorer."""
+        """Update the session, live prediction context, and visible explorer."""
         normalized = posixpath.normpath(path or "/") or "/"
         session = self.terms.get(sid)
         if session is not None:
-            if session.cwd == normalized:
-                # still refresh path label if explorer is open on this session
-                pass
-            else:
-                session.cwd = normalized
+            session.cwd = normalized
+
+        # The JS bridge keeps its own completion context. Refresh it on every
+        # OSC cwd update so ranking uses the directory the shell is actually in,
+        # not the initial "/" captured when the terminal widget was created.
+        page = self.terminal_widgets.get(sid)
+        term = self._find_term_widget(page)
+        if term is not None and hasattr(term, "set_completion_context"):
+            term.set_completion_context(
+                server_id=self.terminal_server_ids.get(sid, self.current_id or ""),
+                cwd=normalized,
+                shell=self.terminal_shells.get(sid, ""),
+            )
+
         current = self.terminal_picker.currentData() if getattr(self, "terminal_picker", None) else None
         if sid != current:
             return
