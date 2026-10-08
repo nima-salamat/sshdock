@@ -6,7 +6,7 @@ All remote history is sanitized before it reaches this module.
 """
 from __future__ import annotations
 
-from collections import Counter, defaultdict, deque
+from collections import Counter, OrderedDict, defaultdict, deque
 import hashlib
 import json
 from dataclasses import dataclass
@@ -600,6 +600,9 @@ class CommandPredictor:
         self._snapshot_fingerprints: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=32))
         self._weights: dict[str, float] = dict(self.DEFAULT_WEIGHTS)
         self._clock = 0
+        # Context depends on history, cwd and shell, not the typed prefix.
+        # Keep a small LRU so each keystroke does not rescan up to 1,200 rows.
+        self._context_cache: OrderedDict[tuple[str, str, str, int], dict[str, Any]] = OrderedDict()
 
     @staticmethod
     def _scope(server_id: str | None) -> str:
@@ -836,10 +839,16 @@ class CommandPredictor:
         return executable
 
     def _build_context(self, scope: str, cwd: str, shell: str) -> dict[str, Any]:
-        """Precompute contextual statistics once per ranking request."""
-        observations = tuple(self._history.get(scope, ()))
+        """Return cached contextual statistics for an unchanged history/cwd/shell."""
         current_cwd = self._normalize_cwd(cwd)
         current_shell = self._shell_name(shell)
+        cache_key = (scope, current_cwd, current_shell, self._clock)
+        cached = self._context_cache.get(cache_key)
+        if cached is not None:
+            self._context_cache.move_to_end(cache_key)
+            return cached
+
+        observations = tuple(self._history.get(scope, ()))
         cwd_hits: Counter[str] = Counter()
         shell_hits: Counter[str] = Counter()
         cwd_similarity: dict[str, float] = {}
@@ -887,7 +896,7 @@ class CommandPredictor:
             "local", "workspace", "workspaces", "projects", "project",
         })
 
-        return {
+        context = {
             "observations": observations,
             "cwd": current_cwd,
             "shell": current_shell,
@@ -901,6 +910,11 @@ class CommandPredictor:
             "previous_family": previous_family,
             "path_words": path_words,
         }
+        self._context_cache[cache_key] = context
+        self._context_cache.move_to_end(cache_key)
+        while len(self._context_cache) > 12:
+            self._context_cache.popitem(last=False)
+        return context
 
     def clear(self) -> None:
         self._history.clear()
@@ -913,6 +927,7 @@ class CommandPredictor:
         self._snapshot_fingerprints.clear()
         self._weights = dict(self.DEFAULT_WEIGHTS)
         self._clock = 0
+        self._context_cache.clear()
 
     def _feature_values(
         self,
@@ -1082,11 +1097,8 @@ class CommandPredictor:
         # History-backed candidates retain their learned features; starter
         # candidates only contribute prefix/context fit and never get recorded
         # as commands the user actually ran.
-        candidates = dict.fromkeys(counts.keys() if counts else self.STARTER_COMMANDS)
-        context = self._build_context(scope, cwd or "/", shell or "")
-        scored: list[tuple[float, str, dict[str, float]]] = []
-
-        for command in candidates:
+        candidates: list[str] = []
+        for command in dict.fromkeys(counts.keys() if counts else self.STARTER_COMMANDS):
             candidate = normalize_prediction(command)
             if not candidate:
                 continue
@@ -1096,6 +1108,16 @@ class CommandPredictor:
                 continue
             if self._is_noop_directory_change(candidate, cwd or "/"):
                 continue
+            candidates.append(candidate)
+
+        # Avoid building the full context (a history scan) for prefixes that
+        # cannot match any known command.
+        if not candidates:
+            return []
+        context = self._build_context(scope, cwd or "/", shell or "")
+        scored: list[tuple[float, str, dict[str, float]]] = []
+
+        for candidate in candidates:
             features = self._feature_values(
                 scope, candidate, raw, cwd or "/", shell or "", context=context
             )
