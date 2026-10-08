@@ -11,6 +11,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 import math
+import posixpath
 import re
 import shlex
 from typing import Any, Iterable, Mapping
@@ -114,14 +115,21 @@ class PredictionCandidate:
 class CommandPredictor:
     """Small contextual online-learning ranker with bounded local state."""
 
-    STATE_VERSION = 2
+    STATE_VERSION = 3
     DEFAULT_WEIGHTS = {
         "bias": 0.35,
         "frequency": 2.6,
         "recency": 2.2,
         "transition": 2.9,
         "cwd": 1.65,
+        "cwd_path": 1.8,
+        "cwd_recency": 1.6,
         "shell": 1.05,
+        "family_transition": 1.4,
+        "argument_fit": 0.85,
+        "directory_change": 0.9,
+        "directory_familiarity": 1.7,
+        "parent_navigation": 0.65,
         "token_fit": 2.5,
         "prefix_fit": 1.35,
         "accepted": 2.9,
@@ -268,6 +276,194 @@ class CommandPredictor:
         except ValueError:
             return tuple(command.split())
 
+    @staticmethod
+    def _normalize_cwd(cwd: str | None) -> str:
+        """Normalize an absolute POSIX cwd received from the remote shell."""
+        value = str(cwd or "").strip()
+        if not value or not value.startswith("/"):
+            return ""
+        return posixpath.normpath(value)
+
+    @staticmethod
+    def _path_segments(path: str | None) -> tuple[str, ...]:
+        normalized = CommandPredictor._normalize_cwd(path)
+        if not normalized or normalized == "/":
+            return ()
+        return tuple(part for part in normalized.split("/") if part)
+
+    @staticmethod
+    def _path_similarity(left: str | None, right: str | None) -> float:
+        """Segment-aware common path-prefix score (never a string-prefix test)."""
+        a = CommandPredictor._path_segments(left)
+        b = CommandPredictor._path_segments(right)
+        if not a or not b:
+            return 0.0
+        common = 0
+        for left_part, right_part in zip(a, b):
+            if left_part != right_part:
+                break
+            common += 1
+        return common / max(len(a), len(b))
+
+    @staticmethod
+    def _home_for_cwd(cwd: str | None) -> str | None:
+        """Infer common POSIX home roots only when the current path supports it."""
+        path = CommandPredictor._normalize_cwd(cwd)
+        if not path:
+            return None
+        segments = CommandPredictor._path_segments(path)
+        if segments and segments[0] == "root":
+            return "/root"
+        if len(segments) >= 2 and segments[0] in {"home", "Users"}:
+            return "/" + "/".join(segments[:2])
+        return None
+
+    @classmethod
+    def _directory_target(cls, command: str, cwd: str | None) -> str | None:
+        """Resolve simple cd targets without executing shell expansions."""
+        parts = list(cls._command_parts(normalize_prediction(command)))
+        if not parts:
+            return None
+        if parts[0] in {"builtin", "command"} and len(parts) > 1:
+            parts = parts[1:]
+        if parts[0] != "cd":
+            return None
+
+        args = parts[1:]
+        if args and args[0] == "--":
+            args = args[1:]
+        if len(args) > 1:
+            # Compound commands may have other side effects and aren't merely
+            # directory changes; don't treat them as no-op navigation.
+            return None
+
+        current = cls._normalize_cwd(cwd)
+        target = args[0] if args else "~"
+        if target == "-":
+            return None
+
+        if target in {"$PWD", "${PWD}", "$(pwd)", "`pwd`"}:
+            target = current
+        elif target.startswith("$PWD/"):
+            if not current:
+                return None
+            target = posixpath.join(current, target[len("$PWD/"):])
+        elif target.startswith("${PWD}/"):
+            if not current:
+                return None
+            target = posixpath.join(current, target[len("${PWD}/"):])
+
+        home = cls._home_for_cwd(current)
+        if target in {"~", "$HOME", "${HOME}"}:
+            if not home:
+                return None
+            target = home
+        elif target.startswith("~/") or target.startswith("$HOME/") or target.startswith("${HOME}/"):
+            if not home:
+                return None
+            if target.startswith("~/"):
+                suffix = target[2:]
+            elif target.startswith("$HOME/"):
+                suffix = target[len("$HOME/"):]
+            else:
+                suffix = target[len("${HOME}/"):]
+            target = posixpath.join(home, suffix)
+
+        # Do not guess the meaning of unexpanded environment variables, globs,
+        # or command substitutions; they may refer to a different directory.
+        if "$" in target or "`" in target or "$(" in target:
+            return None
+        if not target or target == ".":
+            target = current
+        elif not target.startswith("/"):
+            if not current:
+                return None
+            target = posixpath.join(current, target)
+
+        return posixpath.normpath(target) if target.startswith("/") else None
+
+    @classmethod
+    def _is_noop_directory_change(cls, command: str, cwd: str | None) -> bool:
+        current = cls._normalize_cwd(cwd)
+        target = cls._directory_target(command, current)
+        return bool(current and target and current == target)
+
+    @classmethod
+    def _command_family(cls, command: str) -> str:
+        """Generalize transitions across flags/arguments of the same executable."""
+        parts = cls._command_parts(normalize_prediction(command))
+        if not parts:
+            return ""
+        executable = parts[0].rsplit("/", 1)[-1].casefold()
+        return executable
+
+    def _build_context(self, scope: str, cwd: str, shell: str) -> dict[str, Any]:
+        """Precompute contextual statistics once per ranking request."""
+        observations = tuple(self._history.get(scope, ()))
+        current_cwd = self._normalize_cwd(cwd)
+        current_shell = self._shell_name(shell)
+        cwd_hits: Counter[str] = Counter()
+        shell_hits: Counter[str] = Counter()
+        cwd_similarity: dict[str, float] = {}
+        cwd_last_index: dict[str, int] = {}
+        known_directories: Counter[str] = Counter()
+        family_transitions: Counter[tuple[str, str]] = Counter()
+        family_totals: Counter[str] = Counter()
+
+        for index, observation in enumerate(observations):
+            observed_cwd = self._normalize_cwd(observation.cwd)
+            if observed_cwd:
+                known_directories[observed_cwd] += 1
+                if current_cwd and observed_cwd == current_cwd:
+                    cwd_hits[observation.command] += 1
+                    cwd_last_index[observation.command] = index
+                elif current_cwd and observation.command:
+                    similarity = self._path_similarity(current_cwd, observed_cwd)
+                    if similarity > cwd_similarity.get(observation.command, 0.0):
+                        cwd_similarity[observation.command] = similarity
+
+            if current_shell and self._shell_name(observation.shell) == current_shell:
+                shell_hits[observation.command] += 1
+
+            directory_target = self._directory_target(observation.command, observed_cwd)
+            if directory_target:
+                known_directories[directory_target] += 1
+
+            if index:
+                previous_family = self._command_family(observations[index - 1].command)
+                next_family = self._command_family(observation.command)
+                if previous_family:
+                    family_totals[previous_family] += 1
+                    family_transitions[(previous_family, next_family)] += 1
+
+        cwd_recency = {
+            command: math.exp(-max(0, len(observations) - 1 - index) / 20.0)
+            for command, index in cwd_last_index.items()
+        }
+        previous_family = self._command_family(observations[-1].command) if observations else ""
+        path_words: set[str] = set()
+        for segment in self._path_segments(current_cwd):
+            path_words.update(word.casefold() for word in re.split(r"[^A-Za-z0-9]+", segment) if len(word) > 2)
+        path_words.difference_update({
+            "home", "users", "root", "srv", "var", "tmp", "opt", "usr",
+            "local", "workspace", "workspaces", "projects", "project",
+        })
+
+        return {
+            "observations": observations,
+            "cwd": current_cwd,
+            "shell": current_shell,
+            "cwd_hits": cwd_hits,
+            "shell_hits": shell_hits,
+            "cwd_similarity": cwd_similarity,
+            "cwd_recency": cwd_recency,
+            "known_directories": known_directories,
+            "family_transitions": family_transitions,
+            "family_totals": family_totals,
+            "previous_family": previous_family,
+            "path_words": path_words,
+        }
+
     def clear(self) -> None:
         self._history.clear()
         self._counts.clear()
@@ -287,8 +483,11 @@ class CommandPredictor:
         prefix: str,
         cwd: str,
         shell: str,
+        *,
+        context: Mapping[str, Any] | None = None,
     ) -> dict[str, float]:
-        observations = tuple(self._history[scope])
+        context = context or self._build_context(scope, cwd, shell)
+        observations = context["observations"]
         counts = self._counts[scope]
         count = counts.get(command, 0)
         frequency = min(1.0, math.log1p(count) / math.log(16.0))
@@ -301,20 +500,13 @@ class CommandPredictor:
         transition_count = self._transitions[scope].get((previous, command), 0) if previous else 0
         transition = min(1.0, math.log1p(transition_count) / math.log(8.0))
 
-        cwd_norm = cwd or "/"
-        cwd_hits = sum(
-            1 for obs in observations
-            if (obs.cwd or "/") == cwd_norm and obs.command == command
-        )
+        cwd_norm = context["cwd"]
+        cwd_hits = context["cwd_hits"].get(command, 0)
         cwd_affinity = min(1.0, math.log1p(cwd_hits) / math.log(6.0))
+        cwd_path = context["cwd_similarity"].get(command, 0.0)
+        cwd_recent = context["cwd_recency"].get(command, 0.0)
 
-        shell_name = self._shell_name(shell)
-        shell_hits = 0
-        if shell_name:
-            shell_hits = sum(
-                1 for obs in observations
-                if self._shell_name(obs.shell) == shell_name and obs.command == command
-            )
+        shell_hits = context["shell_hits"].get(command, 0)
         shell_affinity = min(1.0, math.log1p(shell_hits) / math.log(6.0))
 
         current_parts = self._prefix_parts(prefix or "")
@@ -326,6 +518,46 @@ class CommandPredictor:
             token_fit = 1.0
         elif len(current_parts) == 1 and candidate_parts and candidate_parts[0].casefold().startswith(current_parts[0].casefold()):
             token_fit = 0.65
+
+        previous_family = context["previous_family"]
+        candidate_family = self._command_family(command)
+        family_total = context["family_totals"].get(previous_family, 0)
+        family_transition = (
+            context["family_transitions"].get((previous_family, candidate_family), 0) / family_total
+            if previous_family and family_total
+            else 0.0
+        )
+
+        path_words = context["path_words"]
+        argument_words: set[str] = set()
+        for token in candidate_parts[1:]:
+            argument_words.update(word.casefold() for word in re.split(r"[^A-Za-z0-9]+", token) if len(word) > 2)
+        argument_fit = (
+            min(1.0, len(path_words.intersection(argument_words)) / max(1, len(path_words)))
+            if path_words
+            else 0.0
+        )
+
+        directory_target = self._directory_target(command, cwd_norm)
+        directory_change = 1.0 if directory_target and directory_target != cwd_norm else 0.0
+        known_directory_hits = (
+            context["known_directories"].get(directory_target, 0)
+            if directory_target
+            else 0
+        )
+        directory_familiarity = (
+            min(1.0, math.log1p(known_directory_hits) / math.log(4.0))
+            if known_directory_hits
+            else 0.0
+        )
+        parent_navigation = (
+            1.0
+            if directory_target
+            and cwd_norm
+            and directory_target != cwd_norm
+            and directory_target == posixpath.dirname(cwd_norm)
+            else 0.0
+        )
 
         accepted_count = self._accepted[scope].get(command, 0)
         accepted_total = max(1, sum(self._accepted[scope].values()))
@@ -342,7 +574,14 @@ class CommandPredictor:
             "recency": recency,
             "transition": transition,
             "cwd": cwd_affinity,
+            "cwd_path": cwd_path,
+            "cwd_recency": cwd_recent,
             "shell": shell_affinity,
+            "family_transition": family_transition,
+            "argument_fit": argument_fit,
+            "directory_change": directory_change,
+            "directory_familiarity": directory_familiarity,
+            "parent_navigation": parent_navigation,
             "token_fit": token_fit,
             "prefix_fit": prefix_fit,
             "accepted": accepted,
@@ -406,6 +645,7 @@ class CommandPredictor:
         # candidates only contribute prefix/context fit and never get recorded
         # as commands the user actually ran.
         candidates = dict.fromkeys(counts.keys() if counts else self.STARTER_COMMANDS)
+        context = self._build_context(scope, cwd or "/", shell or "")
         scored: list[tuple[float, str, dict[str, float]]] = []
 
         for command in candidates:
@@ -416,7 +656,11 @@ class CommandPredictor:
                 continue
             if len(candidate) <= len(raw):
                 continue
-            features = self._feature_values(scope, candidate, raw, cwd or "/", shell or "")
+            if self._is_noop_directory_change(candidate, cwd or "/"):
+                continue
+            features = self._feature_values(
+                scope, candidate, raw, cwd or "/", shell or "", context=context
+            )
             score = self._score(features)
             if score >= float(min_score):
                 scored.append((score, candidate, features))
@@ -592,7 +836,7 @@ class CommandPredictor:
         limit: int = 1,
         min_score: float = 3.0,
     ) -> str | list[str] | None:
-        """Suggest commands from learned history, with starter fallback on first use."""
+        """Suggest context-ranked commands, including safe cold-start candidates."""
         raw = prefix or ""
         empty_prefix = not raw.strip()
         if empty_prefix and limit == 1:
@@ -600,81 +844,18 @@ class CommandPredictor:
 
         scope = self._scope(server_id)
         counts = self._counts[scope]
-        current_parts = self._prefix_parts(raw)
-        previous = self._history[scope][-1].command if self._history[scope] else None
-        cwd_norm = cwd or "/"
-        shell_norm = (shell or "").split("/")[-1].lower()
-
-        observations = tuple(self._history[scope])
-        cwd_counts = Counter(
-            obs.command for obs in observations if (obs.cwd or "/") == cwd_norm
+        # Starter suggestions deliberately have a lower score than personalized
+        # history, but should still be available on a brand-new server.
+        threshold = float(min_score) if counts else -1.0
+        ranked = self.suggest_ranked(
+            raw,
+            server_id=server_id,
+            cwd=cwd or "/",
+            shell=shell or "",
+            limit=max(1, min(5, int(limit))),
+            min_score=threshold,
         )
-        shell_counts = Counter(
-            obs.command for obs in observations
-            if shell_norm and (obs.shell or "").split("/")[-1].lower() == shell_norm
-        )
-
-        candidates = dict.fromkeys(counts.keys() if counts else self.STARTER_COMMANDS)
-        candidates_scored: list[tuple[float, str]] = []
-        raw_cf = raw.casefold()
-
-        for command in candidates:
-            candidate = normalize_prediction(command)
-            if not candidate:
-                continue
-            if not empty_prefix and not candidate.casefold().startswith(raw_cf):
-                continue
-            if len(candidate) <= len(raw):
-                continue
-
-            count = counts.get(candidate, 0)
-            # Learned commands keep the established scoring scale. Unseen
-            # starter commands start lower, so server history wins when present.
-            score = 10.0 if count else 3.0
-            if count:
-                score += min(7.0, math.log2(count + 1) * 1.8)
-
-                last = self._last_seen[scope].get(candidate, 0)
-                if last:
-                    age = max(0, self._clock - last)
-                    score += 4.0 * math.exp(-age / 80.0)
-
-            if previous:
-                transition_count = self._transitions[scope].get((previous, candidate), 0)
-                score += min(8.0, math.log2(transition_count + 1) * 2.5)
-
-            if current_parts:
-                try:
-                    candidate_parts = shlex.split(candidate)
-                except ValueError:
-                    candidate_parts = candidate.split()
-                if candidate_parts and candidate_parts[: len(current_parts)] == list(current_parts):
-                    score += 3.0
-
-            cwd_hits = cwd_counts.get(candidate, 0)
-            if cwd_hits:
-                score += min(5.0, 2.0 + math.log2(cwd_hits + 1))
-
-            shell_hits = shell_counts.get(candidate, 0)
-            if shell_hits:
-                score += min(3.0, 1.0 + math.log2(shell_hits + 1))
-
-            candidates_scored.append((score, candidate))
-
-        candidates_scored.sort(key=lambda item: (-item[0], item[1].casefold(), item[1]))
-        selected: list[str] = []
-        seen: set[str] = set()
-        for score, candidate in candidates_scored:
-            if score < min_score:
-                continue
-            key = candidate.casefold()
-            if key in seen:
-                continue
-            seen.add(key)
-            selected.append(candidate)
-            if len(selected) >= max(1, int(limit)):
-                break
-
+        selected = [candidate.command for candidate in ranked]
         if limit == 1:
             return selected[0] if selected else None
         return selected
