@@ -589,7 +589,7 @@ def test_multiline_paste_parser_keeps_nonempty_commands_in_order_and_ignores_bla
 
     from app.terminal.predictor import CommandPredictor
     predictor = CommandPredictor()
-    predictor.add_command("\\n".join(expected), server_id="server", cwd="/root", shell="bash")
+    predictor.add_command("\n".join(expected), server_id="server", cwd="/root", shell="bash")
     learned = predictor.state_dict()["history"]["server"]
     assert [row["command"] for row in learned[-4:]] == expected
     assert learned[-3]["cwd"] == "/opt/django-paas-deployer"
