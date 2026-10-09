@@ -508,3 +508,30 @@ def test_terminal_session_has_independent_auto_reconnect_for_its_pty_transport()
     assert "self.channel = await self.ssh.open_shell()" in src
     assert "terminal-auto-reconnect" in src
     assert "self.status.emit(\"● Reconnecting…\")" in src
+
+
+def test_terminal_clipboard_shortcuts_and_right_click_are_wired():
+    html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    widget = (ROOT / "app/terminal/web_widget.py").read_text(encoding="utf-8")
+
+    assert "term.hasSelection()" in html
+    assert "copyTextToClipboard(term.getSelection())" in html
+    assert "key === 'c'" in html
+    assert "key === 'v'" in html
+    assert "terminalHost.addEventListener('contextmenu'" in html
+    assert "requestClipboardPaste()" in html
+    assert "paste: function (data)" in html
+    assert "paste_requested = Signal()" in widget
+    assert "def request_paste(self) -> None:" in widget
+    assert "QApplication.clipboard().text()" in widget
+    assert "window.sshdockTerm.paste" in widget
+
+
+def test_magic_table_copy_cell_row_and_entire_table_use_real_cell_coordinates():
+    html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    assert 'data-row="'+rowIdx+'" data-col="'+i+'"' in html
+    assert "function tableText()" in html
+    assert "sshdock-copy-table" in html
+    assert "copyText(tableText())" in html
+    assert "Copy cell" in html
+    assert "Copy row" in html

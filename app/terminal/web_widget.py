@@ -36,6 +36,7 @@ class _Bridge(QObject):
     magic_command = Signal(str)
     command_submitted = Signal(str)
     copy_requested = Signal(str)
+    paste_requested = Signal()
     scroll_changed = Signal(int, int, int)
     suggestion_accepted = Signal(str)
     suggestion_cancelled = Signal()
@@ -133,8 +134,11 @@ class _Bridge(QObject):
 
     @Slot(str)
     def copy_text(self, text: str) -> None:
-        if text:
-            self.copy_requested.emit(text)
+        self.copy_requested.emit(str(text))
+
+    @Slot()
+    def request_paste(self) -> None:
+        self.paste_requested.emit()
 
     @Slot(int, int, int)
     def report_scroll(self, max_line: int, viewport_line: int, rows: int) -> None:
@@ -184,6 +188,7 @@ class XtermTerminalWidget(QWidget):
         self._bridge.suggestion_accepted.connect(self._on_suggestion_accepted)
         self._bridge.suggestion_cancelled.connect(self._on_suggestion_cancelled)
         self._bridge.copy_requested.connect(self._on_copy_requested)
+        self._bridge.paste_requested.connect(self._on_paste_requested)
         self._bridge.scroll_changed.connect(self._on_scroll_changed)
 
         layout = QVBoxLayout(self)
@@ -549,6 +554,22 @@ class XtermTerminalWidget(QWidget):
             QApplication.clipboard().setText(str(text))
         except Exception:
             pass
+
+    def _on_paste_requested(self) -> None:
+        """Read the operating-system clipboard and paste through xterm.js."""
+        try:
+            from PySide6.QtWidgets import QApplication
+            text = QApplication.clipboard().text()
+        except Exception:
+            return
+        if not text:
+            return
+        import json
+        payload = json.dumps(text)
+        self._run_js(
+            "window.sshdockTerm && window.sshdockTerm.paste && "
+            f"window.sshdockTerm.paste({payload});"
+        )
 
     def _on_input(self, data: str) -> None:
         self.input_bytes.emit(data.encode("utf-8", "surrogatepass"))

@@ -71,14 +71,49 @@
     }
     .sshdock-tbl .cap {
       flex: 0 0 auto;
-      padding: 2px 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 18px;
+      padding: 1px 4px 1px 8px;
       font-size: 11px;
       color: #8b949e;
       background: #0e141c;
       border-bottom: 1px solid #1e2630;
       white-space: nowrap;
+    }
+    .sshdock-tbl .cap-label {
+      flex: 1 1 auto;
+      min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .sshdock-tbl .sshdock-copy-table {
+      flex: 0 0 18px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      margin: 0;
+      padding: 0;
+      border: 1px solid #344255;
+      border-radius: 3px;
+      color: #a9c7e8;
+      background: #151f2b;
+      cursor: pointer;
+    }
+    .sshdock-tbl .sshdock-copy-table:hover {
+      color: #ffffff;
+      background: #25384d;
+      border-color: #5c83ac;
+    }
+    .sshdock-tbl .sshdock-copy-table svg {
+      display: block;
+      width: 13px;
+      height: 13px;
+      pointer-events: none;
     }
     .sshdock-tbl .body {
       flex: 1 1 auto;
@@ -1050,8 +1085,73 @@
         sendInput(data);
       });
 
+      function copyTextToClipboard(value) {
+        const text = String(value == null ? '' : value);
+        if (bridge && bridge.copy_text) {
+          try { bridge.copy_text(text); return true; } catch (e) {}
+        }
+        try {
+          const area = document.createElement('textarea');
+          area.value = text;
+          area.setAttribute('readonly', '');
+          area.style.position = 'fixed';
+          area.style.left = '-10000px';
+          area.style.top = '0';
+          document.body.appendChild(area);
+          area.select();
+          const copied = document.execCommand('copy');
+          area.remove();
+          return !!copied;
+        } catch (e) {
+          return false;
+        }
+      }
+
+      function requestClipboardPaste() {
+        if (bridge && bridge.request_paste) {
+          try { bridge.request_paste(); return; } catch (e) {}
+        }
+        try {
+          if (navigator.clipboard && navigator.clipboard.readText) {
+            navigator.clipboard.readText().then(function(value) {
+              if (value) term.paste(String(value));
+            }).catch(function() {});
+          }
+        } catch (e) {}
+      }
+
+      terminalHost.addEventListener('contextmenu', function(ev) {
+        const target = ev.target;
+        if (target && target.closest && target.closest('.sshdock-tbl, #sshdock-suggestions')) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (term.hasSelection()) {
+          copyTextToClipboard(term.getSelection());
+        } else {
+          requestClipboardPaste();
+        }
+      });
+
       // API for Python
       term.attachCustomKeyEventHandler(function (ev) {
+        const key = String(ev.key || '').toLowerCase();
+        if (ev.type === 'keydown' && ev.ctrlKey && !ev.altKey && !ev.metaKey &&
+            (key === 'c' || ev.code === 'KeyC') && term.hasSelection()) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          copyTextToClipboard(term.getSelection());
+          return false;
+        }
+        // Keep Ctrl+C native when no text is selected so shells still receive SIGINT.
+        if (ev.type === 'keydown' && ev.ctrlKey && !ev.altKey && !ev.metaKey &&
+            (key === 'v' || ev.code === 'KeyV')) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          hideGhost();
+          hideSuggestions();
+          requestClipboardPaste();
+          return false;
+        }
         if (ev.type === 'keydown' && ev.ctrlKey && !ev.altKey && (ev.key === ' ' || ev.code === 'Space')) {
           ev.preventDefault();
           ev.stopPropagation();
@@ -1125,6 +1225,10 @@
 
       window.sshdockTerm = {
         write: function (data) { term.write(data); },
+        paste: function (data) {
+          const value = String(data == null ? '' : data);
+          if (value) term.paste(value);
+        },
         setTerminalAISettings: function (data) {
           try {
             terminalAI.shadowEnabled = data && data.shadowEnabled !== false;
@@ -1217,8 +1321,12 @@
             block._cells = RESERVE;
             block._anchorMarker = anchorMarker;
 
-            let html = '<div class="cap">' + esc(cmd ? ('$ '+cmd) : ('$ '+title)) +
-              ' · ' + esc(title) + ' · ' + rows.length + ' rows</div><div class="body"><table><colgroup>';
+            let html = '<div class="cap"><span class="cap-label">' + esc(cmd ? ('$ '+cmd) : ('$ '+title)) +
+              ' · ' + esc(title) + ' · ' + rows.length + ' rows</span>' +
+              '<button class="sshdock-copy-table" type="button" title="Copy entire table as TSV" aria-label="Copy entire table as TSV">' +
+              '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round">' +
+              '<rect x="5" y="2" width="9" height="11" rx="1.4"></rect><path d="M3.5 4.5H3a1 1 0 0 0-1 1V14a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-.5"></path>' +
+              '</svg></button></div><div class="body"><table><colgroup>';
             const equalWidth = (100 / Math.max(1, cols.length)).toFixed(4) + '%';
             cols.forEach(function() { html += '<col style="width:'+equalWidth+'">'; });
             html += '</colgroup><thead><tr>';
@@ -1234,7 +1342,8 @@
                 const val = cell==null?'':String(cell);
                 const cl = [];
                 if (i===statusIdx){ const s=statusClass(val); if(s) cl.push(s); }
-                html += '<td'+(cl.length?' class="'+cl.join(' ')+'"':'')+
+                html += '<td data-row="'+rowIdx+'" data-col="'+i+'"'+
+                  (cl.length?' class="'+cl.join(' ')+'"':'')+
                   ' title="'+esc(val)+'">'+esc(val)+'</td>';
               });
               html += '</tr>';
@@ -1250,6 +1359,19 @@
               const tr = table && table.querySelector('tbody tr[data-row="'+rowIdx+'"]');
               if (!tr) return '';
               return Array.from(tr.children).map(function(td){ return td.textContent || ''; }).join('\t');
+            }
+            function tableText() {
+              const lines = [];
+              const headers = Array.from(table.querySelectorAll('thead th')).map(function(th) {
+                return th.textContent || '';
+              });
+              if (headers.length) lines.push(headers.join('\t'));
+              table.querySelectorAll('tbody tr').forEach(function(tr) {
+                lines.push(Array.from(tr.children).map(function(td) {
+                  return td.textContent || '';
+                }).join('\t'));
+              });
+              return lines.join('\n');
             }
             function closeCopyMenu() {
               const menu = document.getElementById('sshdock-copy-menu');
@@ -1285,6 +1407,14 @@
               menu.style.left = Math.max(4, Math.min(ev.clientX, window.innerWidth - menu.offsetWidth - 6)) + 'px';
               menu.style.top = Math.max(4, Math.min(ev.clientY, window.innerHeight - menu.offsetHeight - 6)) + 'px';
               ev.preventDefault(); ev.stopPropagation();
+            }
+            const copyTableBtn = block.querySelector('.sshdock-copy-table');
+            if (copyTableBtn) {
+              copyTableBtn.addEventListener('click', function(ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                copyText(tableText());
+              });
             }
             table.querySelectorAll('tbody td').forEach(function(td){
               td.addEventListener('contextmenu', function(ev){
