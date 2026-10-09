@@ -398,6 +398,10 @@ class TerminalSession(QObject):
                 if self._closing or self._closed_emitted:
                     return
                 self.status.emit("● Reconnecting…")
+                # A new PTY must prove its own result-reporting hook. Never
+                # carry learned transport capability across reconnects.
+                self.result_reporting_enabled = False
+                self._awaiting_command_result = False
                 try:
                     if not self.ssh.is_connected:
                         await self.ssh.connect(with_worker_pool=False, with_command_transport=False)
