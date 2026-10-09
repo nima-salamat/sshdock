@@ -4,7 +4,14 @@ ROOT = Path(__file__).parents[1] / "app"
 
 
 def test_application_create_task_calls_are_registered():
-    allowed = {"core/runtime.py", "workers/task_manager.py", "remote/server.py"}
+    # main.py's task is the application root coroutine, explicitly awaited by
+    # run_until_complete(), rather than an untracked background task.
+    allowed = {
+        "core/runtime.py",
+        "workers/task_manager.py",
+        "remote/server.py",
+        "main.py",
+    }
     offenders = []
     for path in ROOT.rglob("*.py"):
         rel = path.relative_to(ROOT).as_posix()
@@ -20,7 +27,7 @@ def test_long_lived_compose_stream_uses_dedicated_transport():
     s = (ROOT / "ui/compose_panel.py").read_text(encoding="utf-8")
     assert "await ssh.clone_transport()" in s
     assert '"down"' in s
-    assert 'await stream_ssh.start_command(shell_cmd)' in s
+    assert "await stream_ssh.start_command(shell_cmd)" in s
     assert "await stream_ssh.close()" in s
 
 
