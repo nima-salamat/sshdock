@@ -360,11 +360,13 @@ def test_terminal_session_reports_and_strips_shell_exit_status():
     results = []
     session.command_result.connect(results.append)
 
+    assert not session.result_reporting_enabled
     visible = session._extract_cwd(
         b"command output\x1b]777;sshdock-result;7\x07prompt"
     )
 
     assert visible == b"command outputprompt"
+    assert session.result_reporting_enabled
     assert results == [7]
 
 
@@ -375,18 +377,22 @@ def test_terminal_session_handles_split_exit_status_marker():
     results = []
     session.command_result.connect(results.append)
 
+    assert not session.result_reporting_enabled
     first = session._extract_cwd(b"output\x1b]777;sshdock-result;1")
+    assert not session.result_reporting_enabled
     second = session._extract_cwd(b"\x07prompt")
 
     assert first == b"output"
     assert second == b"prompt"
+    assert session.result_reporting_enabled
     assert results == [1]
 
 
 def test_shell_integration_emits_exit_status_for_supported_shells():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
 
-    assert 'self.result_reporting_enabled = shell_name in {"bash", "zsh", "fish"}' in src
+    assert 'self.result_reporting_supported = shell_name in {"bash", "zsh", "fish"}' in src
+    assert "self.result_reporting_enabled = True" in src
     assert src.count("sshdock-result;%s") >= 3
     assert "precmd_functions=(__sshdock_cwd" in src
     assert "set -l __sshdock_status $status" in src
@@ -402,7 +408,9 @@ def test_terminal_learning_waits_for_real_shell_result():
     )[0]
 
     assert "_terminal_pending_command_results[sid]" in submitted
-    assert "_command_predictor.add_command(" not in submitted
+    assert 'if getattr(session, "result_reporting_enabled", False):' in submitted
+    assert "self._command_predictor.add_command(" in submitted
+    assert "self._persist_terminal_predictor()" in submitted
     assert "record_command_result(" in result
     assert "success=int(exit_code) == 0" in result
     assert "session.command_result.connect(" in main
