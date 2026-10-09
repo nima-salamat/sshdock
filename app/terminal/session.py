@@ -46,7 +46,7 @@ class TerminalSession(QObject):
         self._close_lock = asyncio.Lock()
         self.cwd = "/"
         self.result_reporting_enabled = False
-        self.result_reporting_supported = False
+        self._awaiting_command_result = False
         self._osc_buf = b""  # carry partial OSC sequences across reads
         self._internal_echo_pending = False
         self._internal_echo_buffer = b""
@@ -57,10 +57,10 @@ class TerminalSession(QObject):
         if self.running or self.channel:
             return
         self._closing = False
-        # A supported shell is not proof that its prompt hook is actually active.
-        # Re-validate after every connection/reconnect by observing the real OSC marker.
+        # Ignore startup prompt markers. Live result reporting becomes trusted only
+        # after a marker arrives for an explicitly submitted user command.
         self.result_reporting_enabled = False
-        self.result_reporting_supported = False
+        self._awaiting_command_result = False
         self.status.emit("● Connecting…")
         try:
             # Open the user's normal interactive shell first. This preserves
@@ -116,7 +116,6 @@ class TerminalSession(QObject):
             shell_name = (getattr(shell_probe, "stdout", "") or "").strip().lower()
         except Exception:
             shell_name = ""
-        self.result_reporting_supported = shell_name in {"bash", "zsh", "fish"}
 
         if shell_name == "bash":
             setup = (
@@ -218,6 +217,10 @@ class TerminalSession(QObject):
                 except Exception:
                     pass
 
+    def expect_command_result(self) -> None:
+        """Arm exit-status correlation for the next prompt after a user submission."""
+        self._awaiting_command_result = True
+
     def _extract_cwd(self, data: bytes) -> bytes:
         """Parse OSC 7 (cwd) + OSC 777 magic; strip magic from stream."""
         blob = self._osc_buf + data
@@ -244,11 +247,12 @@ class TerminalSession(QObject):
                 exit_code = int(match.group(1))
             except (TypeError, ValueError):
                 continue
-            if 0 <= exit_code <= 255:
-                # Only enable result-correlated learning after a complete marker
-                # has actually traversed the PTY. Shell-name detection alone is
-                # insufficient when user prompt configuration overrides our hook.
+            if 0 <= exit_code <= 255 and self._awaiting_command_result:
+                # A marker during shell startup is not proof that online
+                # command/result correlation is working. Only a marker associated
+                # with an actual submitted command enables the optimized path.
                 self.result_reporting_enabled = True
+                self._awaiting_command_result = False
                 self.command_result.emit(exit_code)
 
         cleaned = blob
