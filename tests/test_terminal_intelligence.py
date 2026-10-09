@@ -404,7 +404,9 @@ def test_terminal_session_recovers_when_prompt_marker_has_no_exit_status():
         b"output\x1b]7;file://sshdock/opt/app\x07prompt"
     )
 
-    assert visible == b"outputprompt"
+    # OSC 7 remains in the PTY stream for xterm.js; the Python parser consumes
+    # it for cwd tracking without treating it as an exit-status marker.
+    assert visible == b"output\x1b]7;file://sshdock/opt/app\x07prompt"
     assert session.cwd == "/opt/app"
     assert not session.result_reporting_enabled
     assert not session._awaiting_command_result
@@ -435,7 +437,9 @@ def test_shell_integration_emits_exit_status_for_supported_shells():
 
     assert "def expect_command_result(self) -> None:" in src
     assert "self._awaiting_command_result = True" in src
-    assert "if 0 <= exit_code <= 255 and self._awaiting_command_result:" in src
+    assert "if self._awaiting_command_result:" in src
+    assert "if 0 <= exit_code <= 255:" in src
+    assert "elif cwd_markers:" in src
     assert "self.result_reporting_enabled = True" in src
     assert src.count("sshdock-result;%s") >= 3
     assert "precmd_functions=(__sshdock_cwd" in src
