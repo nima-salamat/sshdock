@@ -522,3 +522,30 @@ def test_programmatically_launched_terminal_commands_are_tagged_internal():
     assert 'str(payload).rstrip() + " # __sshdock_internal__\\r"' in palette
     assert 'command_line += " # __sshdock_internal__\\r"' in create
 
+
+
+def test_loading_existing_ai_state_removes_previously_saved_explorer_commands():
+    from app.terminal.predictor import CommandPredictor
+
+    internal_commands = [
+        r'''cd '/opt/app' && printf '\\033]7;file://sshdock%s\\007' "$PWD"''',
+        '''sh -c 'printf "[SSHDock] Extracting: %s" "$archive"' ''',
+        "git status # __sshdock_internal__",
+    ]
+    manual_commands = ["cd /opt/app", "rm -f -- old.tmp", "vim compose.yml", "git status"]
+    state = {
+        "version": 3,
+        "history": {
+            "server": [{"command": command, "cwd": "/opt/app", "shell": "bash"}
+                       for command in internal_commands + manual_commands]
+        },
+        "accepted": {"server": {"git status # __sshdock_internal__": 8, "git status": 2}},
+        "success": {"server": {"cd '/opt/app' && printf 'file://sshdock'": 5}},
+    }
+
+    predictor = CommandPredictor()
+    predictor.load_state_dict(state)
+    learned = predictor.state_dict()
+    assert [row["command"] for row in learned["history"]["server"]] == manual_commands
+    assert learned["accepted"]["server"] == {"git status": 2}
+    assert "cd '/opt/app' && printf 'file://sshdock'" not in learned.get("success", {}).get("server", {})
