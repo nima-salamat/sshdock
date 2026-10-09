@@ -477,11 +477,14 @@ def test_file_explorer_generated_shell_commands_never_enter_ai_suggestions():
     predictor = CommandPredictor()
     assert not predictor.add_command(explorer_cd, server_id="server", cwd="/")
     assert not predictor.add_command(explorer_extract, server_id="server", cwd="/")
+    assert split_shell_commands("git status # __sshdock_internal__") == []
+    assert not predictor.add_command("git status # __sshdock_internal__", server_id="server", cwd="/")
 
     # These same command families remain eligible when the user types them.
     assert predictor.add_command("cd /opt/django-paas-deployer", server_id="server", cwd="/")
     assert predictor.add_command("rm -f -- old.tmp", server_id="server", cwd="/tmp")
     assert predictor.add_command("vim compose.yml", server_id="server", cwd="/opt/django-paas-deployer")
+    assert predictor.add_command("git status", server_id="server", cwd="/opt/django-paas-deployer")
     history = predictor.state_dict()["history"]["server"]
     assert [row["command"] for row in history] == [
         "cd /opt/django-paas-deployer",
@@ -504,3 +507,17 @@ def test_remote_shell_history_parser_drops_explorer_entries_but_keeps_manual_com
     ])
     snapshot = parse_history_output(output)
     assert list(snapshot.commands) == ["cd /opt/app", "rm -f -- old.tmp", "vim compose.yml"]
+
+
+def test_programmatically_launched_terminal_commands_are_tagged_internal():
+    main = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
+    palette = main.split("def _show_terminal_suggestions(", 1)[1].split(
+        "def _on_terminal_magic_resize(", 1
+    )[0]
+    create = main.split("async def _create_terminal_impl(", 1)[1].split(
+        "def _persist_terminal_predictor(", 1
+    )[0]
+
+    assert 'str(payload).rstrip() + " # __sshdock_internal__\\r"' in palette
+    assert 'command_line += " # __sshdock_internal__\\r"' in create
+
