@@ -2662,12 +2662,6 @@ class MainWindow(QMainWindow):
             classified = classify_docker_result(result)
             details = (result.stderr or result.stdout or classified.message or f"docker {action} failed").strip()
             details = f"$ {result.command}\n\n[{classified.kind.value}] {details}"
-            ErrorDialog(
-                "Docker action failed",
-                f"Could not {action} container «{name}».",
-                details,
-                self,
-            )
             await await_dialog(ErrorDialog(
                 "Docker action failed",
                 f"Could not {action} container «{name}».",
