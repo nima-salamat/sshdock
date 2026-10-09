@@ -5590,7 +5590,7 @@ async def _file_download_selected(self):
     from pathlib import Path
     meta=item.data(Qt.ItemDataRole.UserRole) or {}
     remote=meta.get("path") or _resolve_remote_path(self.file_path.text(),item.text())
-    local, _ = await choose_file(self, "Download", save=True, directory=Path(item.text()).name)
+    local, _ = await choose_file(self, "Download", save=True, file_name=Path(item.text()).name)
     if not local:return
     try:
         sftp=await self.manager.servers[self.current_id].ssh.sftp(); await sftp.get(remote,local)
