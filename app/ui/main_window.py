@@ -3208,7 +3208,7 @@ class MainWindow(QMainWindow):
             # The predictor rejects __sshdock_* entries, while manually typed commands
             # like pwd/ls/git status remain eligible for learning.
             command = str(payload).rstrip() + " # __sshdock_internal__\r"
-            self._spawn(session.write(command.encode("utf-8")), name="Terminal suggestion")
+            self._spawn(session.write_internal_command(command.encode("utf-8")), name="Terminal suggestion")
 
     def _on_terminal_magic_resize(self, sid: str, cols: int):
         # HTML overlay reflows with CSS — no re-query / re-print on resize.
@@ -3604,9 +3604,9 @@ class MainWindow(QMainWindow):
         command = (
             f"cd {shlex.quote(target)} && "
             r"printf '\033]7;file://sshdock%s\007' \"$PWD\""
-            "\r"
+            " # __sshdock_internal__\r"
         )
-        self._spawn(session.write(command.encode("utf-8")), name="Terminal explorer cd")
+        self._spawn(session.write_internal_command(command.encode("utf-8")), name="Terminal explorer cd")
 
     def _run_terminal_explorer_command(self, command: str):
         sid = self.terminal_picker.currentData() if getattr(self, "terminal_picker", None) else None
@@ -3614,9 +3614,9 @@ class MainWindow(QMainWindow):
         if session is None or not session.running:
             self.statusBar().showMessage("Open a terminal session first", 2500)
             raise RuntimeError("No active terminal session")
-        payload = (str(command).rstrip() + "\r").encode("utf-8")
+        payload = (str(command).rstrip() + " # __sshdock_internal__\r").encode("utf-8")
         return self._spawn(
-            session.write(payload),
+            session.write_internal_command(payload),
             name="Terminal explorer command",
         )
 
@@ -3948,7 +3948,7 @@ class MainWindow(QMainWindow):
                 # container shell), not typed by the user. Keep it out of AI history.
                 command_line = " ".join(_shlex.quote(x) for x in command)
                 command_line += " # __sshdock_internal__\r"
-                await session.write(command_line.encode("utf-8"))
+                await session.write_internal_command(command_line.encode("utf-8"))
             self._refresh_terminal_selector(session.id)
             self.terminal_stack.setCurrentWidget(page)
             term.setFocus(Qt.FocusReason.OtherFocusReason)
