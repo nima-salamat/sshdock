@@ -87,6 +87,18 @@ def _install_process_signal_handlers(app: QApplication) -> tuple[dict[int, objec
     return previous, restore
 
 
+def _configure_application_lifecycle(app: QApplication) -> None:
+    """Let async_main own shutdown instead of Qt stopping qasync on last-window close.
+
+    Startup and message dialogs are opened non-blockingly, so Qt would otherwise
+    emit quit as soon as the last visible dialog closes. That can stop QEventLoop
+    before the awaiting coroutine resumes, raising "Event loop stopped before
+    Future completed". MainWindow already performs an asynchronous, awaited
+    shutdown and signals async_main when cleanup is complete.
+    """
+    app.setQuitOnLastWindowClosed(False)
+
+
 def main() -> None:
     configure_logging()
     install_exception_hooks()
@@ -95,6 +107,7 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("SSHDock")
     app.setOrganizationName("SSHDock")
+    _configure_application_lifecycle(app)
     loop = QEventLoop(app)
     asyncio.set_event_loop(loop)
     _previous_signal_handlers, restore_signal_handlers = _install_process_signal_handlers(app)
