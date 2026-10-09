@@ -552,3 +552,17 @@ def test_loading_existing_ai_state_removes_previously_saved_explorer_commands():
     assert [row["command"] for row in learned["history"]["server"]] == manual_commands
     assert learned["accepted"]["server"] == {"git status": 2}
     assert "cd '/opt/app' && printf 'file://sshdock'" not in learned.get("success", {}).get("server", {})
+
+
+def test_internal_history_marker_is_hidden_from_fragmented_terminal_echo():
+    from app.terminal.session import TerminalSession
+
+    session = TerminalSession(ssh=None, title="test")
+    session._internal_echo_pending = True
+    first = session._extract_cwd(b"git status # __sshdock_in")
+    second = session._extract_cwd(b"ternal__\\r\\nworktree clean\\r\\n")
+
+    assert first == b"git status"
+    assert second == b"\\r\\nworktree clean\\r\\n"
+    assert not session._internal_echo_pending
+
