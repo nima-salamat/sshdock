@@ -385,6 +385,7 @@
       let ghostAnchorX = null;
       let inputModel = '';
       let inputModelKnown = true;
+      let pendingMultilinePaste = '';
       let suggestionRequestSeq = 0;
       let suggestionRefreshTimer = null;
       let suggestions = [];
@@ -820,6 +821,28 @@
         const value = String(data || '');
         if (!value) return;
 
+        // Bracketed paste remains an editing buffer until Enter confirms it.
+        // This prevents Ctrl+C on an unsubmitted paste from polluting history.
+        if (pendingMultilinePaste) {
+          if (/^[\r\n]+$/.test(value)) {
+            const submittedPaste = pendingMultilinePaste;
+            pendingMultilinePaste = '';
+            if (bridge && bridge.report_command_batch) {
+              try { bridge.report_command_batch(submittedPaste); } catch (e) {}
+            }
+            inputModel = '';
+            inputModelKnown = true;
+            ghostAnchorX = null;
+            hideGhost();
+            hideSuggestions();
+            return;
+          }
+          // Any edit or cancellation after paste makes the snapshot unreliable.
+          pendingMultilinePaste = '';
+          inputModel = '';
+          inputModelKnown = false;
+        }
+
         /*
          * A paste can arrive as one onData payload containing multiple lines.
          * It is not proof that any command was submitted: the user may cancel
@@ -834,12 +857,20 @@
           hideSuggestions();
           ghostAnchorX = null;
           inputModel = '';
-          const pasteEndsAtCommandBoundary = /[\r\n]$/.test(value);
-          const pasteContainsShellBlock = /(?:^|[\r\n;&|]\s*)(?:if|then|elif|else|fi|for|while|until|select|case|esac|do|done|function)\b/i.test(value);
-          const pasteContainsHereDoc = /(^|[^<])<<(?!<)/.test(value);
+          const bracketedPaste = value.indexOf('\x1b[200~') >= 0 && value.indexOf('\x1b[201~') >= 0;
+          const pastedText = value.replace(/\x1b\[200~/g, '').replace(/\x1b\[201~/g, '');
+          const pasteEndsAtCommandBoundary = /[\r\n]$/.test(pastedText);
+          const pasteContainsShellBlock = /(?:^|[\r\n;&|]\s*)(?:if|then|elif|else|fi|for|while|until|select|case|esac|do|done|function)\b/i.test(pastedText);
+          const pasteContainsHereDoc = /(^|[^<])<<(?!<)/.test(pastedText);
           inputModelKnown = pasteEndsAtCommandBoundary &&
             !pasteContainsShellBlock && !pasteContainsHereDoc &&
-            !value.trimEnd().endsWith('\\');
+            !pastedText.trimEnd().endsWith('\\');
+          if (bracketedPaste || !pasteEndsAtCommandBoundary) {
+            pendingMultilinePaste = pastedText;
+          } else if (bridge && bridge.report_command_batch) {
+            // Unbracketed newline-terminated pastes submit their lines immediately.
+            try { bridge.report_command_batch(pastedText); } catch (e) {}
+          }
           return;
         }
 
