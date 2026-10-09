@@ -3891,6 +3891,10 @@ class MainWindow(QMainWindow):
                 session.command_result.connect(
                     lambda exit_code, sid=session.id: self._terminal_command_result(sid, exit_code)
                 )
+            if hasattr(session, "command_result_missing"):
+                session.command_result_missing.connect(
+                    lambda sid=session.id: self._terminal_command_result_missing(sid)
+                )
             session.status.connect(lambda text, sid=session.id: self._set_terminal_status(sid, text))
             # The session can reach CONNECTED before the UI subscribes to its signal.
             # Synchronize the current state explicitly so the UI never remains on
@@ -4255,6 +4259,24 @@ class MainWindow(QMainWindow):
         expect_result = getattr(session, "expect_command_result", None)
         if callable(expect_result):
             expect_result()
+        self._persist_terminal_predictor()
+
+    def _terminal_command_result_missing(self, sid: str) -> None:
+        """Finish learning when the shell returned to a prompt without an exit code."""
+        pending = self._terminal_pending_command_results.pop(sid, None)
+        if pending is None:
+            return
+        command, server_id, cwd, shell, was_suggested = pending
+        parsed = split_shell_commands(command, limit=64)
+        if not parsed:
+            return
+        self._command_predictor.add_command(
+            command, server_id=server_id, cwd=cwd, shell=shell
+        )
+        if len(parsed) == 1 and was_suggested:
+            self._command_predictor.record_suggestion_acceptance(
+                parsed[0], server_id=server_id, cwd=cwd, shell=shell
+            )
         self._persist_terminal_predictor()
 
     def _terminal_command_result(self, sid: str, exit_code: int) -> None:
