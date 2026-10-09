@@ -490,6 +490,7 @@ def test_file_explorer_generated_shell_commands_never_enter_ai_suggestions():
         "cd /opt/django-paas-deployer",
         "rm -f -- old.tmp",
         "vim compose.yml",
+        "git status",
     ]
 
 
