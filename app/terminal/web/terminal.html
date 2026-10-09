@@ -844,10 +844,8 @@
         }
 
         /*
-         * A paste can arrive as one onData payload containing multiple lines.
-         * It is not proof that any command was submitted: the user may cancel
-         * the pasted text with Ctrl+C. Never report multiline paste as a
-         * submitted command. Learning resumes from the next known prompt line.
+         * Multiline paste is staged until submission is confirmed below.
+         * Canceled or edited paste buffers are discarded instead of learned.
          */
         if (value.length > 1 && /[\r\n]/.test(value)) {
           if (bridge && bridge.report_suggestion_cancelled) {
