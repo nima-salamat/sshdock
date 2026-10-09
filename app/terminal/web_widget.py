@@ -35,6 +35,7 @@ class _Bridge(QObject):
     cwd_changed = Signal(str)
     magic_command = Signal(str)
     command_submitted = Signal(str)
+    command_batch_submitted = Signal(str)
     copy_requested = Signal(str)
     paste_requested = Signal()
     scroll_changed = Signal(int, int, int)
@@ -98,6 +99,12 @@ class _Bridge(QObject):
     def report_command(self, command: str) -> None:
         if command:
             self.command_submitted.emit(command)
+
+    @Slot(str)
+    def report_command_batch(self, command_batch: str) -> None:
+        value = str(command_batch or "")
+        if value and len(value) <= 65536:
+            self.command_batch_submitted.emit(value)
 
     @Slot(str)
     def report_suggestion_accepted(self, command: str) -> None:
@@ -185,6 +192,7 @@ class XtermTerminalWidget(QWidget):
         self._bridge.cwd_changed.connect(self._on_cwd_changed)
         self._bridge.magic_command.connect(self._on_magic_command)
         self._bridge.command_submitted.connect(self._on_command_submitted)
+        self._bridge.command_batch_submitted.connect(self._on_command_batch_submitted)
         self._bridge.suggestion_accepted.connect(self._on_suggestion_accepted)
         self._bridge.suggestion_cancelled.connect(self._on_suggestion_cancelled)
         self._bridge.copy_requested.connect(self._on_copy_requested)
@@ -400,6 +408,19 @@ class XtermTerminalWidget(QWidget):
                 handler = getattr(parent, "_terminal_command_submitted", None)
                 if callable(handler):
                     handler(command, self)
+                    return
+                parent = parent.parentWidget()
+        except Exception:
+            pass
+
+    def _on_command_batch_submitted(self, command_batch: str) -> None:
+        """Forward confirmed multiline paste for execution-aware history learning."""
+        try:
+            parent = self.parentWidget()
+            while parent is not None:
+                handler = getattr(parent, "_terminal_command_batch_submitted", None)
+                if callable(handler):
+                    handler(command_batch, self)
                     return
                 parent = parent.parentWidget()
         except Exception:
