@@ -266,7 +266,7 @@ class TerminalSession(QObject):
 
         # The command echo is the first line after write_internal_command().
         # Handle fragmented SSH reads without delaying normal terminal output.
-        line_end = buffered.find(b"\\n")
+        line_end = buffered.find(b"\n")
         search_end = len(buffered) if line_end < 0 else line_end + 1
         marker_at = buffered.find(marker, 0, search_end)
         if marker_at >= 0:
