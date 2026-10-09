@@ -1345,7 +1345,27 @@ class CommandPredictor:
             for scope, rows in raw_history.items():
                 if not isinstance(rows, list):
                     continue
-                for row in rows[-self.max_commands:]:
+                bounded_rows = rows[-self.max_commands:]
+                # Older versions split Explorer's `cd ... && printf OSC7 ...`
+                # into separate history observations, losing the marker from the
+                # `cd` row. When the next row is SSHDock's cwd-report printf, drop
+                # the immediately preceding cd as part of the same internal action.
+                explorer_cd_rows: set[int] = set()
+                for index, row in enumerate(bounded_rows):
+                    if not isinstance(row, Mapping):
+                        continue
+                    command = row.get("command")
+                    if not isinstance(command, str) or "file://sshdock" not in command.casefold():
+                        continue
+                    if index > 0 and isinstance(bounded_rows[index - 1], Mapping):
+                        previous = bounded_rows[index - 1].get("command")
+                        parsed_previous = split_shell_commands(previous, limit=2) if isinstance(previous, str) else []
+                        if len(parsed_previous) == 1 and parsed_previous[0].casefold().startswith("cd "):
+                            explorer_cd_rows.add(index - 1)
+                for row_index, row in enumerate(bounded_rows):
+                    if row_index in explorer_cd_rows:
+                        legacy_magic_feedback = True
+                        continue
                     if not isinstance(row, Mapping):
                         continue
                     command = row.get("command")
