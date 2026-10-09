@@ -5251,11 +5251,11 @@ class MainWindow(QMainWindow):
             async def _run():
                 if not cache["volumes"] and not cache["networks"] and not cache["images"]:
                     await _refresh_cache()
-                then()
+                await then()
             self._spawn(_run())
 
         def _browse_volumes():
-            def open_picker():
+            async def open_picker():
                 existing = []
                 for part in volumes.text().split(","):
                     part = part.strip()
@@ -5266,7 +5266,7 @@ class MainWindow(QMainWindow):
                     "Select volumes", cache["volumes"], selected=existing, multi=True, parent=dlg,
                     hint="Checked volumes are added as name:/data — edit mount path after pick if needed.",
                 )
-                if dlg_p.exec() == QDialog.DialogCode.Accepted:
+                if await await_dialog(dlg_p) == int(QDialog.DialogCode.Accepted):
                     current_parts = [x.strip() for x in volumes.text().split(",") if x.strip()]
                     current_names = set()
                     for p in current_parts:
@@ -5281,87 +5281,91 @@ class MainWindow(QMainWindow):
             _ensure_cache(open_picker)
 
         def _browse_networks():
-            def open_picker():
+            async def open_picker():
                 existing = [x.strip() for x in networks.text().split(",") if x.strip()]
                 dlg_p = ResourcePickerDialog(
                     "Select networks", cache["networks"], selected=existing, multi=True, parent=dlg,
                     hint="Search and check one or more networks.",
                 )
-                if dlg_p.exec() == QDialog.DialogCode.Accepted:
+                if await await_dialog(dlg_p) == int(QDialog.DialogCode.Accepted):
                     net_wrap.setText(", ".join(dlg_p.selected_names))
             _ensure_cache(open_picker)
 
         def _import_env():
-            path, _ = QFileDialog.getOpenFileName(
-                dlg, "Import .env file", "", "Env files (*.env .env*);;All files (*)"
-            )
-            if not path:
-                return
-            try:
-                raw = Path(path).read_text(encoding="utf-8", errors="replace")
-            except OSError as exc:
-                QMessageBox.warning(dlg, "Import .env", str(exc))
-                return
-            lines = []
-            for line in raw.splitlines():
-                s = line.strip()
-                if not s or s.startswith("#"):
-                    continue
-                if s.startswith("export "):
-                    s = s[7:].strip()
-                if "=" in s:
-                    lines.append(s)
-            if not lines:
-                QMessageBox.information(dlg, "Import .env", "No KEY=value lines found.")
-                return
-            existing = env.toPlainText().rstrip()
-            block = "\n".join(lines)
-            env.setPlainText((existing + "\n" + block).strip() if existing else block)
-            QMessageBox.information(dlg, "Import .env", f"Imported {len(lines)} variable(s).")
+            async def import_env_async():
+                path, _ = await choose_file(
+                    dlg, "Import .env file", name_filter="Env files (*.env .env*);;All files (*)"
+                )
+                if not path:
+                    return
+                try:
+                    raw = Path(path).read_text(encoding="utf-8", errors="replace")
+                except OSError as exc:
+                    await show_message(dlg, "Import .env", str(exc), icon=QMessageBox.Icon.Warning)
+                    return
+                parsed_lines = []
+                for line in raw.splitlines():
+                    value = line.strip()
+                    if not value or value.startswith("#"):
+                        continue
+                    if value.startswith("export "):
+                        value = value[7:].strip()
+                    if "=" in value:
+                        parsed_lines.append(value)
+                if not parsed_lines:
+                    await show_message(dlg, "Import .env", "No KEY=value lines found.")
+                    return
+                existing = env.toPlainText().rstrip()
+                block = "\n".join(parsed_lines)
+                env.setPlainText((existing + "\n" + block).strip() if existing else block)
+                await show_message(dlg, "Import .env", f"Imported {len(parsed_lines)} variable(s).")
+            self._spawn(import_env_async())
 
         vol_pick.clicked.connect(_browse_volumes)
         net_pick.clicked.connect(_browse_networks)
         env_import.clicked.connect(_import_env)
 
         def submit():
-            if not image.text().strip():
-                QMessageBox.warning(dlg, "Create container", "Image is required.")
-                return
-            if not name_wrap.is_name_available():
-                QMessageBox.warning(
-                    dlg, "Create container",
-                    f"Container name «{name.text().strip()}» is already in use.\n"
-                    "Choose a unique name, or leave Name empty for an auto-generated one.",
-                )
-                return
-            conflicts = port_wrap.conflicts()
-            if conflicts:
-                detail = ", ".join(f"{p} ({why})" for p, why in conflicts)
-                reply = QMessageBox.question(
-                    dlg,
-                    "Ports in use",
-                    f"These host ports are already in use on the server:\n{detail}\n\n"
-                    "Create the container anyway? Docker may fail to bind them.",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No,
-                )
-                if reply != QMessageBox.StandardButton.Yes:
+            async def submit_async():
+                if not image.text().strip():
+                    await show_message(dlg, "Create container", "Image is required.", icon=QMessageBox.Icon.Warning)
                     return
-            task = self._spawn(self._create_container_exec(
-                image.text().strip(), name.text().strip(), ports.text().strip(),
-                env.toPlainText(), command.text().strip(), restart.currentText(),
-                volumes.text().strip(), networks.text().strip(),
-                privileged.isChecked(), rm_flag.isChecked(),
-                interactive=interactive.isChecked(),
-                open_shell=open_shell_after.isChecked(),
-            ))
-            task.add_done_callback(lambda _: dlg.accept())
+                if not name_wrap.is_name_available():
+                    await show_message(
+                        dlg, "Create container",
+                        f"Container name «{name.text().strip()}» is already in use.\n"
+                        "Choose a unique name, or leave Name empty for an auto-generated one.",
+                        icon=QMessageBox.Icon.Warning,
+                    )
+                    return
+                conflicts = port_wrap.conflicts()
+                if conflicts:
+                    detail = ", ".join(f"{p} ({why})" for p, why in conflicts)
+                    proceed = await ask_yes_no(
+                        dlg,
+                        "Ports in use",
+                        f"These host ports are already in use on the server:\n{detail}\n\n"
+                        "Create the container anyway? Docker may fail to bind them.",
+                    )
+                    if not proceed:
+                        return
+                task = self._spawn(self._create_container_exec(
+                    image.text().strip(), name.text().strip(), ports.text().strip(),
+                    env.toPlainText(), command.text().strip(), restart.currentText(),
+                    volumes.text().strip(), networks.text().strip(),
+                    privileged.isChecked(), rm_flag.isChecked(),
+                    interactive=interactive.isChecked(),
+                    open_shell=open_shell_after.isChecked(),
+                ))
+                if task is not None:
+                    task.add_done_callback(lambda _: dlg.accept())
+            self._spawn(submit_async())
+
         create.clicked.connect(submit)
         for w in (image, name, ports, volumes, networks, env, command):
             self._install_copy_context(w)
         self._spawn(_refresh_cache())
-        dlg.exec()
-
+        dlg.open()
 
     async def _create_container_exec(
         self, image, name, ports, env_text, command, restart,
