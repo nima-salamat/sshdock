@@ -275,7 +275,7 @@ def test_live_terminal_cwd_is_pushed_into_prediction_context():
     assert "shell=self.terminal_shells.get(sid, \"\")" in handler
     assert handler.index("term.set_completion_context(") < handler.index("if sid != current:")
 
-def test_multiline_paste_is_not_forwarded_to_learner_before_submission():
+def test_multiline_paste_is_staged_until_submission_before_learning():
     html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
     start = html.index("function observeInput(")
     end = html.index("/* Printable insertion is only unambiguous", start)
@@ -283,10 +283,16 @@ def test_multiline_paste_is_not_forwarded_to_learner_before_submission():
 
     assert "value.length > 1 && /[\\r\\n]/.test(value)" in paste_path
     assert "bridge.report_command(value)" not in paste_path
-    assert "Never report multiline paste as a" in paste_path
-    assert "inputModelKnown = pasteEndsAtCommandBoundary &&" in paste_path
+    assert "let pendingMultilinePaste = '';" in html
+    assert "bridge.report_command_batch(submittedPaste)" in paste_path
+    assert "const bracketedPaste =" in paste_path
+    assert "pasteEndsAtCommandBoundary" in paste_path
     assert "pasteContainsShellBlock" in paste_path
     assert "pasteContainsHereDoc" in paste_path
+    assert "pendingMultilinePaste = pastedText;" in paste_path
+    assert paste_path.index("if (bracketedPaste || !pasteEndsAtCommandBoundary)") < paste_path.index(
+        "bridge.report_command_batch(pastedText)"
+    )
 
 def test_tab_keeps_native_shell_completion_even_with_ai_popup_open():
     html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
@@ -403,14 +409,17 @@ def test_terminal_learning_waits_for_real_shell_result():
 
 
 
-def test_multiline_paste_is_never_reported_as_a_submitted_command():
+def test_multiline_paste_reports_a_batch_after_enter_not_as_one_command():
     html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
-    start = html.index("A paste can arrive as one onData payload containing multiple lines.")
+    start = html.index("function observeInput(")
     end = html.index("/* Printable insertion is only unambiguous", start)
     paste_handler = html[start:end]
 
-    assert "Never report multiline paste as a" in paste_handler
-    assert "bridge.report_command" not in paste_handler
+    assert "bridge.report_command_batch(submittedPaste)" in paste_handler
+    assert "bridge.report_command_batch(pastedText)" in paste_handler
+    assert "bridge.report_command(value)" not in paste_handler
+    assert "pendingMultilinePaste = '';" in paste_handler
+    assert "if (/^[\\r\\n]+$/.test(value))" in paste_handler
     assert "inputModel = ''" in paste_handler
     assert "pasteEndsAtCommandBoundary" in paste_handler
 
