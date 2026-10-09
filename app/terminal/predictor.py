@@ -535,6 +535,32 @@ def split_shell_commands(command: str, *, limit: int = 64) -> list[str]:
     return commands
 
 
+def split_pasted_shell_commands(command: str, *, limit: int = 64) -> list[str]:
+    """Return a conservative list of independently submitted commands from a paste.
+
+    A terminal paste may produce only one prompt-result marker. Each executable
+    line must therefore parse as exactly one top-level command. Reject compound
+    lines, control blocks and unfinished continuations to avoid misattributing results.
+    """
+    value = re.sub(r"\x1b\[20[01]~", "", str(command or ""))
+    value = value.replace("\r\n", "\n").replace("\r", "\n")
+    if not value.strip():
+        return []
+
+    max_commands = max(1, min(64, int(limit)))
+    commands: list[str] = []
+    for line in value.split("\n"):
+        candidate = line.strip()
+        if not candidate or candidate.startswith("#"):
+            continue
+        parsed = split_shell_commands(candidate, limit=2)
+        if len(parsed) != 1:
+            return []
+        commands.append(parsed[0])
+        if len(commands) > max_commands:
+            return []
+    return commands
+
 @dataclass(frozen=True, slots=True)
 class PredictionContext:
     server_id: str = ""
