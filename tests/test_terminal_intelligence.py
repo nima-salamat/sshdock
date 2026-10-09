@@ -390,6 +390,27 @@ def test_terminal_session_reports_and_strips_shell_exit_status():
     assert results == [7]
 
 
+
+def test_terminal_session_recovers_when_prompt_marker_has_no_exit_status():
+    from app.terminal.session import TerminalSession
+
+    session = TerminalSession(ssh=None, title="test")
+    missing = []
+    session.command_result_missing.connect(lambda: missing.append(True))
+    session.result_reporting_enabled = True
+    session.expect_command_result()
+
+    visible = session._extract_cwd(
+        b"output\x1b]7;file://sshdock/opt/app\x07prompt"
+    )
+
+    assert visible == b"outputprompt"
+    assert session.cwd == "/opt/app"
+    assert not session.result_reporting_enabled
+    assert not session._awaiting_command_result
+    assert missing == [True]
+
+
 def test_terminal_session_handles_split_exit_status_marker():
     from app.terminal.session import TerminalSession
 
@@ -438,6 +459,8 @@ def test_terminal_learning_waits_for_real_shell_result():
     assert "record_command_result(" in result
     assert "success=int(exit_code) == 0" in result
     assert "session.command_result.connect(" in main
+    assert "session.command_result_missing.connect(" in main
+    assert "def _terminal_command_result_missing(" in main
 
 
 
