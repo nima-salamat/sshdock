@@ -16,6 +16,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Install Qt offscreen system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

@@ -41,6 +41,7 @@ from app.files.browser import RemoteFileBrowser, ServerFileBackend, ContainerFil
 from app.files.terminal_explorer import TerminalFileExplorer
 from app.ui.docker_results_table import DockerResultsTable
 from app.ui.dialogs import ErrorDialog, ConfirmRemoveDialog
+from app.ui.async_dialogs import await_dialog, ask_yes_no, show_message, choose_file, input_text
 from app.files.highlighter import CodeHighlighter
 from app.ui.container_details import ContainerDetailsWindow
 from app.ui.widgets import NavButton, MetricCard, icon_button, AutoRefreshControl, TableAutoRefresh, ProxySettingsWidget
@@ -904,7 +905,7 @@ class MainWindow(QMainWindow):
     async def _compose_selected_action(self, action):
         projects=self._selected_compose_projects()
         if not projects:
-            QMessageBox.information(self,"Compose","Select one or more Compose projects first."); return
+            await show_message(self, "Compose", "Select one or more Compose projects first."); return
         outputs=[]
         for project in projects:
             outputs.append(await self._compose_action_for_project(action,project))
@@ -2336,7 +2337,7 @@ class MainWindow(QMainWindow):
         try: await self.manager.connect(profile.id); await self.refresh_overview(); self._set_connection_state(True)
         except Exception as exc:
             self._set_connection_state(False)
-            ErrorDialog("Connection failed", "Could not establish the SSH session.", str(exc), self).exec()
+            await await_dialog(ErrorDialog("Connection failed", "Could not establish the SSH session.", str(exc), self))
 
     async def disconnect_current(self):
         if self.current_id: await self.manager.disconnect(self.current_id); self._set_connection_state(False); self.statusBar().showMessage("Disconnected")
@@ -2346,7 +2347,7 @@ class MainWindow(QMainWindow):
             self._manager_state(self.current_id,"reconnecting")
             try: await self.manager.reconnect(self.current_id); await self.refresh_overview()
             except Exception as exc:
-                ErrorDialog("Reconnect failed", "Could not restore the SSH session.", str(exc), self).exec()
+                await await_dialog(ErrorDialog("Reconnect failed", "Could not restore the SSH session.", str(exc), self))
 
     async def refresh_overview(self):
         if not self.current_id:return
@@ -2647,11 +2648,11 @@ class MainWindow(QMainWindow):
     async def container_action_exec(self,action,name):
         name = (name or "").strip().lstrip("/")
         if not name or name in {"False", "True", "None"}:
-            ErrorDialog("Docker action failed", "Invalid container name.", repr(name), self).exec()
+            await await_dialog(ErrorDialog("Docker action failed", "Invalid container name.", repr(name), self))
             return
         if action == "rm":
             dlg = ConfirmRemoveDialog([name], self)
-            if dlg.exec() != ConfirmRemoveDialog.DialogCode.Accepted:
+            if await await_dialog(dlg) != int(ConfirmRemoveDialog.DialogCode.Accepted):
                 return
             result = await DockerManager(self.manager.servers[self.current_id].ssh).remove(name, force=bool(dlg.force))
         else:
@@ -2661,12 +2662,12 @@ class MainWindow(QMainWindow):
             classified = classify_docker_result(result)
             details = (result.stderr or result.stdout or classified.message or f"docker {action} failed").strip()
             details = f"$ {result.command}\n\n[{classified.kind.value}] {details}"
-            ErrorDialog(
+            await await_dialog(ErrorDialog(
                 "Docker action failed",
                 f"Could not {action} container «{name}».",
                 details,
                 self,
-            ).exec()
+            ))
         await self.load_containers()
 
     async def _bulk_selected(self):
@@ -2714,7 +2715,7 @@ class MainWindow(QMainWindow):
         force = False
         if action == "rm":
             confirm = ConfirmRemoveDialog(names, self)
-            if confirm.exec() != ConfirmRemoveDialog.DialogCode.Accepted:
+            if await await_dialog(confirm) != int(ConfirmRemoveDialog.DialogCode.Accepted):
                 return
             force = confirm.force
         # One window with a tab per container
@@ -2756,7 +2757,7 @@ class MainWindow(QMainWindow):
         if "," in name:
             name = name.split(",", 1)[0].strip()
         if not name or name in {"False", "True", "None"}:
-            ErrorDialog("Container", "Invalid container name.", repr(name), self).exec()
+            await await_dialog(ErrorDialog("Container", "Invalid container name.", repr(name), self))
             return
         ssh = self.manager.servers[self.current_id].ssh
         dlg = ContainerDetailsWindow(self, ssh, name, initial_tab=initial_tab)
@@ -4553,15 +4554,15 @@ class MainWindow(QMainWindow):
     async def _remove_image(self, name: str):
         if not name:
             return
-        if QMessageBox.question(self, "Remove image", f"Remove image {name}?") != QMessageBox.StandardButton.Yes:
+        if not await ask_yes_no(self, "Remove image", f"Remove image {name}?"):
             return
         result = await DockerManager(self.manager.servers[self.current_id].ssh).run(["rmi", name], timeout=120)
         if result.exit_code != 0:
-            ErrorDialog("Remove image", "Docker refused to remove the image.", result.stderr or result.stdout, self).exec()
+            await await_dialog(ErrorDialog("Remove image", "Docker refused to remove the image.", result.stderr or result.stdout, self))
         await self.load_images()
 
     async def _remove_volume(self,name):
-        if QMessageBox.question(self,"Remove volume",f"Remove {name}?")!=QMessageBox.StandardButton.Yes:return
+        if not await ask_yes_no(self, "Remove volume", f"Remove {name}?"): return
         await DockerManager(self.manager.servers[self.current_id].ssh).run(["volume","rm",name],120); await self.load_volumes()
     async def load_networks(self, usage=None):
         if not self.current_id:
@@ -4602,7 +4603,7 @@ class MainWindow(QMainWindow):
                 self.network_table.setRowHeight(row, 38)
 
     async def _remove_network(self,name):
-        if QMessageBox.question(self,"Remove network",f"Remove {name}?")!=QMessageBox.StandardButton.Yes:return
+        if not await ask_yes_no(self, "Remove network", f"Remove {name}?"): return
         await DockerManager(self.manager.servers[self.current_id].ssh).run(["network","rm",name],120); await self.load_networks()
     def _selected_table_names(self, table, name_col: int = 0) -> list[str]:
         rows = sorted({i.row() for i in table.selectionModel().selectedRows()})
@@ -4628,9 +4629,9 @@ class MainWindow(QMainWindow):
             elif iid:
                 refs.append(iid)
         if not refs:
-            QMessageBox.information(self, "Images", "Select one or more images first.")
+            await show_message(self, "Images", "Select one or more images first.")
             return
-        if QMessageBox.question(self, "Remove images", f"Remove {len(refs)} image(s)?") != QMessageBox.StandardButton.Yes:
+        if not await ask_yes_no(self, "Remove images", f"Remove {len(refs)} image(s)?"):
             return
         dm = DockerManager(self.manager.servers[self.current_id].ssh)
         errors = []
@@ -4641,7 +4642,7 @@ class MainWindow(QMainWindow):
         from app.ui.notifications import NotificationBus
         if errors:
             NotificationBus.instance().warning("Some images not removed", f"{len(errors)} failed")
-            ErrorDialog("Remove images", "Some removals failed.", "\n".join(errors), self).exec()
+            await await_dialog(ErrorDialog("Remove images", "Some removals failed.", "\n".join(errors), self))
         else:
             NotificationBus.instance().success("Images removed", str(len(refs)))
         await self.load_images()
@@ -4651,9 +4652,9 @@ class MainWindow(QMainWindow):
             return
         names = self._selected_table_names(self.volume_table, 0)
         if not names:
-            QMessageBox.information(self, "Volumes", "Select one or more volumes first.")
+            await show_message(self, "Volumes", "Select one or more volumes first.")
             return
-        if QMessageBox.question(self, "Remove volumes", f"Remove {len(names)} volume(s)?\n\n" + "\n".join(names[:12])) != QMessageBox.StandardButton.Yes:
+        if not await ask_yes_no(self, "Remove volumes", f"Remove {len(names)} volume(s)?\n\n" + "\n".join(names[:12])):
             return
         dm = DockerManager(self.manager.servers[self.current_id].ssh)
         errors = []
@@ -4664,7 +4665,7 @@ class MainWindow(QMainWindow):
         from app.ui.notifications import NotificationBus
         if errors:
             NotificationBus.instance().warning("Some volumes not removed", f"{len(errors)} failed")
-            ErrorDialog("Remove volumes", "Some removals failed (in use?).", "\n".join(errors), self).exec()
+            await await_dialog(ErrorDialog("Remove volumes", "Some removals failed (in use?).", "\n".join(errors), self))
         else:
             NotificationBus.instance().success("Volumes removed", str(len(names)))
         await self.load_volumes()
@@ -4677,9 +4678,9 @@ class MainWindow(QMainWindow):
         protected = {"bridge", "host", "none"}
         names = [n for n in names if n not in protected]
         if not names:
-            QMessageBox.information(self, "Networks", "Select one or more removable networks first (not bridge/host/none).")
+            await show_message(self, "Networks", "Select one or more removable networks first (not bridge/host/none).")
             return
-        if QMessageBox.question(self, "Remove networks", f"Remove {len(names)} network(s)?\n\n" + "\n".join(names[:12])) != QMessageBox.StandardButton.Yes:
+        if not await ask_yes_no(self, "Remove networks", f"Remove {len(names)} network(s)?\n\n" + "\n".join(names[:12])):
             return
         dm = DockerManager(self.manager.servers[self.current_id].ssh)
         errors = []
@@ -4690,7 +4691,7 @@ class MainWindow(QMainWindow):
         from app.ui.notifications import NotificationBus
         if errors:
             NotificationBus.instance().warning("Some networks not removed", f"{len(errors)} failed")
-            ErrorDialog("Remove networks", "Some removals failed.", "\n".join(errors), self).exec()
+            await await_dialog(ErrorDialog("Remove networks", "Some removals failed.", "\n".join(errors), self))
         else:
             NotificationBus.instance().success("Networks removed", str(len(names)))
         await self.load_networks()
@@ -4706,7 +4707,7 @@ class MainWindow(QMainWindow):
             "system": ("System prune", "docker system prune -f — containers, networks, dangling images"),
         }
         title, desc = labels.get(target, (f"Purge {target}", f"docker {target} prune -f"))
-        if QMessageBox.question(self, title, f"{desc}\n\nContinue?") != QMessageBox.StandardButton.Yes:
+        if not await ask_yes_no(self, title, f"{desc}\n\nContinue?"):
             return
         dm = DockerManager(self.manager.servers[self.current_id].ssh)
         r = await dm.prune(target)
@@ -4716,7 +4717,7 @@ class MainWindow(QMainWindow):
             NotificationBus.instance().success(title, out.splitlines()[-1] if out else "done")
         else:
             NotificationBus.instance().error(title + " failed", out[:100])
-            ErrorDialog(title, "Prune failed.", out, self).exec()
+            await await_dialog(ErrorDialog(title, "Prune failed.", out, self))
         if target == "image":
             await self.load_images()
         elif target in {"volume", "network"}:
@@ -5250,11 +5251,11 @@ class MainWindow(QMainWindow):
             async def _run():
                 if not cache["volumes"] and not cache["networks"] and not cache["images"]:
                     await _refresh_cache()
-                then()
+                await then()
             self._spawn(_run())
 
         def _browse_volumes():
-            def open_picker():
+            async def open_picker():
                 existing = []
                 for part in volumes.text().split(","):
                     part = part.strip()
@@ -5265,7 +5266,7 @@ class MainWindow(QMainWindow):
                     "Select volumes", cache["volumes"], selected=existing, multi=True, parent=dlg,
                     hint="Checked volumes are added as name:/data — edit mount path after pick if needed.",
                 )
-                if dlg_p.exec() == QDialog.DialogCode.Accepted:
+                if await await_dialog(dlg_p) == int(QDialog.DialogCode.Accepted):
                     current_parts = [x.strip() for x in volumes.text().split(",") if x.strip()]
                     current_names = set()
                     for p in current_parts:
@@ -5280,87 +5281,91 @@ class MainWindow(QMainWindow):
             _ensure_cache(open_picker)
 
         def _browse_networks():
-            def open_picker():
+            async def open_picker():
                 existing = [x.strip() for x in networks.text().split(",") if x.strip()]
                 dlg_p = ResourcePickerDialog(
                     "Select networks", cache["networks"], selected=existing, multi=True, parent=dlg,
                     hint="Search and check one or more networks.",
                 )
-                if dlg_p.exec() == QDialog.DialogCode.Accepted:
+                if await await_dialog(dlg_p) == int(QDialog.DialogCode.Accepted):
                     net_wrap.setText(", ".join(dlg_p.selected_names))
             _ensure_cache(open_picker)
 
         def _import_env():
-            path, _ = QFileDialog.getOpenFileName(
-                dlg, "Import .env file", "", "Env files (*.env .env*);;All files (*)"
-            )
-            if not path:
-                return
-            try:
-                raw = Path(path).read_text(encoding="utf-8", errors="replace")
-            except OSError as exc:
-                QMessageBox.warning(dlg, "Import .env", str(exc))
-                return
-            lines = []
-            for line in raw.splitlines():
-                s = line.strip()
-                if not s or s.startswith("#"):
-                    continue
-                if s.startswith("export "):
-                    s = s[7:].strip()
-                if "=" in s:
-                    lines.append(s)
-            if not lines:
-                QMessageBox.information(dlg, "Import .env", "No KEY=value lines found.")
-                return
-            existing = env.toPlainText().rstrip()
-            block = "\n".join(lines)
-            env.setPlainText((existing + "\n" + block).strip() if existing else block)
-            QMessageBox.information(dlg, "Import .env", f"Imported {len(lines)} variable(s).")
+            async def import_env_async():
+                path, _ = await choose_file(
+                    dlg, "Import .env file", name_filter="Env files (*.env .env*);;All files (*)"
+                )
+                if not path:
+                    return
+                try:
+                    raw = Path(path).read_text(encoding="utf-8", errors="replace")
+                except OSError as exc:
+                    await show_message(dlg, "Import .env", str(exc), icon=QMessageBox.Icon.Warning)
+                    return
+                parsed_lines = []
+                for line in raw.splitlines():
+                    value = line.strip()
+                    if not value or value.startswith("#"):
+                        continue
+                    if value.startswith("export "):
+                        value = value[7:].strip()
+                    if "=" in value:
+                        parsed_lines.append(value)
+                if not parsed_lines:
+                    await show_message(dlg, "Import .env", "No KEY=value lines found.")
+                    return
+                existing = env.toPlainText().rstrip()
+                block = "\n".join(parsed_lines)
+                env.setPlainText((existing + "\n" + block).strip() if existing else block)
+                await show_message(dlg, "Import .env", f"Imported {len(parsed_lines)} variable(s).")
+            self._spawn(import_env_async())
 
         vol_pick.clicked.connect(_browse_volumes)
         net_pick.clicked.connect(_browse_networks)
         env_import.clicked.connect(_import_env)
 
         def submit():
-            if not image.text().strip():
-                QMessageBox.warning(dlg, "Create container", "Image is required.")
-                return
-            if not name_wrap.is_name_available():
-                QMessageBox.warning(
-                    dlg, "Create container",
-                    f"Container name «{name.text().strip()}» is already in use.\n"
-                    "Choose a unique name, or leave Name empty for an auto-generated one.",
-                )
-                return
-            conflicts = port_wrap.conflicts()
-            if conflicts:
-                detail = ", ".join(f"{p} ({why})" for p, why in conflicts)
-                reply = QMessageBox.question(
-                    dlg,
-                    "Ports in use",
-                    f"These host ports are already in use on the server:\n{detail}\n\n"
-                    "Create the container anyway? Docker may fail to bind them.",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No,
-                )
-                if reply != QMessageBox.StandardButton.Yes:
+            async def submit_async():
+                if not image.text().strip():
+                    await show_message(dlg, "Create container", "Image is required.", icon=QMessageBox.Icon.Warning)
                     return
-            task = self._spawn(self._create_container_exec(
-                image.text().strip(), name.text().strip(), ports.text().strip(),
-                env.toPlainText(), command.text().strip(), restart.currentText(),
-                volumes.text().strip(), networks.text().strip(),
-                privileged.isChecked(), rm_flag.isChecked(),
-                interactive=interactive.isChecked(),
-                open_shell=open_shell_after.isChecked(),
-            ))
-            task.add_done_callback(lambda _: dlg.accept())
+                if not name_wrap.is_name_available():
+                    await show_message(
+                        dlg, "Create container",
+                        f"Container name «{name.text().strip()}» is already in use.\n"
+                        "Choose a unique name, or leave Name empty for an auto-generated one.",
+                        icon=QMessageBox.Icon.Warning,
+                    )
+                    return
+                conflicts = port_wrap.conflicts()
+                if conflicts:
+                    detail = ", ".join(f"{p} ({why})" for p, why in conflicts)
+                    proceed = await ask_yes_no(
+                        dlg,
+                        "Ports in use",
+                        f"These host ports are already in use on the server:\n{detail}\n\n"
+                        "Create the container anyway? Docker may fail to bind them.",
+                    )
+                    if not proceed:
+                        return
+                task = self._spawn(self._create_container_exec(
+                    image.text().strip(), name.text().strip(), ports.text().strip(),
+                    env.toPlainText(), command.text().strip(), restart.currentText(),
+                    volumes.text().strip(), networks.text().strip(),
+                    privileged.isChecked(), rm_flag.isChecked(),
+                    interactive=interactive.isChecked(),
+                    open_shell=open_shell_after.isChecked(),
+                ))
+                if task is not None:
+                    task.add_done_callback(lambda _: dlg.accept())
+            self._spawn(submit_async())
+
         create.clicked.connect(submit)
         for w in (image, name, ports, volumes, networks, env, command):
             self._install_copy_context(w)
         self._spawn(_refresh_cache())
-        dlg.exec()
-
+        dlg.open()
 
     async def _create_container_exec(
         self, image, name, ports, env_text, command, restart,
@@ -5426,12 +5431,12 @@ class MainWindow(QMainWindow):
                 )
         else:
             details = (r.stderr or r.stdout or "docker run failed").strip()
-            ErrorDialog(
+            await await_dialog(ErrorDialog(
                 "Create container failed",
                 f"Could not create container from «{image}».",
                 f"$ {r.command}\n\n{details}",
                 self,
-            ).exec()
+            ))
 
 
     async def close_async(self):
@@ -5570,9 +5575,9 @@ async def _file_open_selected_row(self,row:int):
         data=open(local,'r',encoding='utf-8',errors='replace').read()
         dlg=QDialog(self); dlg.setWindowTitle(remote); dlg.resize(1000,700)
         lay=QVBoxLayout(dlg); edit=QPlainTextEdit(); edit.setPlainText(data); edit.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu); lay.addWidget(edit)
-        dlg.exec()
+        await await_dialog(dlg)
     except Exception as exc:
-        QMessageBox.warning(self,'Open file',str(exc))
+        await show_message(self, "Open file", str(exc), icon=QMessageBox.Icon.Warning)
 
 async def _file_open_selected(self):
     row=self.file_table.currentRow()
@@ -5589,12 +5594,12 @@ async def _file_download_selected(self):
     from pathlib import Path
     meta=item.data(Qt.ItemDataRole.UserRole) or {}
     remote=meta.get("path") or _resolve_remote_path(self.file_path.text(),item.text())
-    local,_=QFileDialog.getSaveFileName(self,'Download',Path(item.text()).name)
+    local, _ = await choose_file(self, "Download", save=True, file_name=Path(item.text()).name)
     if not local:return
     try:
         sftp=await self.manager.servers[self.current_id].ssh.sftp(); await sftp.get(remote,local)
         self.statusBar().showMessage(f'Downloaded {remote}',5000)
-    except Exception as exc: QMessageBox.warning(self,'Download',str(exc))
+    except Exception as exc: await show_message(self, "Download", str(exc), icon=QMessageBox.Icon.Warning)
 
 def _file_context_menu(self,pos):
     item=self.file_table.itemAt(pos); menu=QMenu(self); copy_name=menu.addAction('Copy name'); copy_path=menu.addAction('Copy path'); menu.addSeparator(); open_a=menu.addAction('Open'); dl=menu.addAction('Download')
@@ -5610,22 +5615,22 @@ def _file_context_menu(self,pos):
 async def _file_upload(self):
     if not self.current_id:return
     from PySide6.QtWidgets import QFileDialog
-    local,_=QFileDialog.getOpenFileName(self,"Upload file")
+    local, _ = await choose_file(self, "Upload file")
     if not local:return
     remote=_resolve_remote_path(self.file_path.text(), os.path.basename(local))
     try:
         sftp=await self.manager.servers[self.current_id].ssh.sftp(); await sftp.put(local,remote); await self._file_browser_refresh(); self.statusBar().showMessage(f"Uploaded {remote}",5000)
-    except Exception as exc: QMessageBox.warning(self,"Upload",str(exc))
+    except Exception as exc: await show_message(self, "Upload", str(exc), icon=QMessageBox.Icon.Warning)
 
 async def _file_new_folder(self):
     if not self.current_id:return
     from PySide6.QtWidgets import QInputDialog
-    name,ok=QInputDialog.getText(self,"New folder","Folder name:")
+    name, ok = await input_text(self, "New folder", "Folder name:")
     if not ok or not name.strip():return
     remote=_resolve_remote_path(self.file_path.text(),name.strip())
     try:
         sftp=await self.manager.servers[self.current_id].ssh.sftp(); await sftp.mkdir(remote); await self._file_browser_refresh()
-    except Exception as exc: QMessageBox.warning(self,"New folder",str(exc))
+    except Exception as exc: await show_message(self, "New folder", str(exc), icon=QMessageBox.Icon.Warning)
 
 async def _file_rename_selected(self):
     if not self.current_id:return
@@ -5634,12 +5639,12 @@ async def _file_rename_selected(self):
     item=self.file_table.item(row,0)
     if not item:return
     from PySide6.QtWidgets import QInputDialog
-    name,ok=QInputDialog.getText(self,"Rename","New name:",text=item.text())
+    name, ok = await input_text(self, "Rename", "New name:", text=item.text())
     if not ok or not name.strip():return
     old=_resolve_remote_path(self.file_path.text(),item.text()); new=_resolve_remote_path(self.file_path.text(),name.strip())
     try:
         sftp=await self.manager.servers[self.current_id].ssh.sftp(); await sftp.rename(old,new); await self._file_browser_refresh()
-    except Exception as exc: QMessageBox.warning(self,"Rename",str(exc))
+    except Exception as exc: await show_message(self, "Rename", str(exc), icon=QMessageBox.Icon.Warning)
 
 async def _file_delete_selected(self):
     if not self.current_id:return
@@ -5647,14 +5652,14 @@ async def _file_delete_selected(self):
     if row<0:return
     item=self.file_table.item(row,0); typ=self.file_table.item(row,1).text() if self.file_table.item(row,1) else "File"
     if not item:return
-    if QMessageBox.question(self,"Delete",f"Delete {item.text()}?") != QMessageBox.StandardButton.Yes:return
+    if not await ask_yes_no(self, "Delete", f"Delete {item.text()}?"):return
     remote=_resolve_remote_path(self.file_path.text(),item.text())
     try:
         sftp=await self.manager.servers[self.current_id].ssh.sftp()
         if typ=="Directory": await sftp.rmtree(remote)
         else: await sftp.remove(remote)
         await self._file_browser_refresh()
-    except Exception as exc: QMessageBox.warning(self,"Delete",str(exc))
+    except Exception as exc: await show_message(self, "Delete", str(exc), icon=QMessageBox.Icon.Warning)
 
 MainWindow._file_upload=_file_upload
 MainWindow._file_new_folder=_file_new_folder

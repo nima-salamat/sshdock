@@ -11,6 +11,7 @@ from app.ssh.client import AuthMaterial
 from app.storage.settings import SettingsStore
 from app.storage.secure import CredentialStore
 from app.ui.dialogs import ConnectionDialog
+from app.ui.async_dialogs import await_dialog
 from app.ui.main_window import MainWindow
 from app.ui.styles import theme_stylesheet
 
@@ -30,7 +31,8 @@ async def async_main(app: QApplication) -> None:
     from app.ui.dialogs import place_dialog_on_best_screen
     place_dialog_on_best_screen(dialog)
 
-    if dialog.exec() != ConnectionDialog.DialogCode.Accepted or not dialog.result_profile:
+    dialog_result = await await_dialog(dialog)
+    if dialog_result != int(ConnectionDialog.DialogCode.Accepted) or not dialog.result_profile:
         return
     profile = dialog.result_profile
     if profile.persist_secrets:
@@ -76,6 +78,6 @@ async def async_main(app: QApplication) -> None:
         await window.add_server_and_connect(profile, auth)
     except Exception as exc:
         from app.ui.dialogs import ErrorDialog
-        ErrorDialog("SSH connection failed", "Could not establish the SSH session.", str(exc), window).exec()
+        await await_dialog(ErrorDialog("SSH connection failed", "Could not establish the SSH session.", str(exc), window))
     # MainWindow.closeEvent performs async shutdown while the qasync loop is alive.
     await window._shutdown_event.wait()
