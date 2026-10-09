@@ -305,7 +305,7 @@ def test_terminal_explorer_supports_archive_extract_via_visible_terminal():
     assert "Extractor not installed" in src
     assert 'run_command=self._run_terminal_explorer_command' in window
     assert 'session.write_internal_command(payload)' in window
-    assert '# __sshdock_internal__\r' in window
+    assert r'# __sshdock_internal__\r' in window
     assert '.tgz' in types and '.tbz2' in types and '.txz' in types
     assert '.lz4' in types and '.lzma' in types
     assert '*.7z|*.cab|*.iso|*.jar|*.war|*.ear|*.apk' in src
