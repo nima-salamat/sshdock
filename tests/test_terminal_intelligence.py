@@ -560,9 +560,9 @@ def test_internal_history_marker_is_hidden_from_fragmented_terminal_echo():
     session = TerminalSession(ssh=None, title="test")
     session._internal_echo_pending = True
     first = session._extract_cwd(b"git status # __sshdock_in")
-    second = session._extract_cwd(b"ternal__\\r\\nworktree clean\\r\\n")
+    second = session._extract_cwd(b"ternal__\r\nworktree clean\r\n")
 
     assert first == b"git status"
-    assert second == b"\\r\\nworktree clean\\r\\n"
+    assert second == b"\r\nworktree clean\r\n"
     assert not session._internal_echo_pending
 
