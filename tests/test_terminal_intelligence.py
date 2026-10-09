@@ -529,6 +529,9 @@ def test_loading_existing_ai_state_removes_previously_saved_explorer_commands():
 
     internal_commands = [
         r'''cd '/opt/app' && printf '\\033]7;file://sshdock%s\\007' "$PWD"''',
+        # Old persisted states split this compound Explorer command into two rows.
+        "cd /opt/app",
+        r'''printf '\\033]7;file://sshdock%s\\007' "$PWD"''',
         '''sh -c 'printf "[SSHDock] Extracting: %s" "$archive"' ''',
         "git status # __sshdock_internal__",
     ]
