@@ -566,3 +566,43 @@ def test_copy_terminal_exports_scrollback_with_html_tables_at_anchor_positions()
     assert "def copy_all_output(self) -> None:" in widget
     assert "window.sshdockTerm.copyAllOutput" in widget
     assert "term.copy_all_output()" in window
+
+
+def test_multiline_paste_parser_keeps_nonempty_commands_in_order_and_ignores_blank_lines():
+    from app.terminal.predictor import split_pasted_shell_commands
+
+    pasted = (
+        "cd /opt/django-paas-deployer\\r\\n"
+        "git pull --ff-only origin master\\r\\n"
+        "\\r\\n"
+        "docker compose up -d --force-recreate celery deployment-worker\\r\\n"
+        "\\r\\n"
+        "docker compose logs --tail=150 deployment-worker celery"
+    )
+    assert split_pasted_shell_commands(pasted) == [
+        "cd /opt/django-paas-deployer",
+        "git pull --ff-only origin master",
+        "docker compose up -d --force-recreate celery deployment-worker",
+        "docker compose logs --tail=150 deployment-worker celery",
+    ]
+
+
+def test_multiline_paste_parser_rejects_compound_lines_and_shell_blocks():
+    from app.terminal.predictor import split_pasted_shell_commands
+
+    assert split_pasted_shell_commands("cd /opt/app && git status\\npwd") == []
+    assert split_pasted_shell_commands("if true; then\\n  pwd\\nfi") == []
+
+
+def test_multiline_paste_is_staged_until_enter_and_learned_from_prompt_result():
+    html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    widget = (ROOT / "app/terminal/web_widget.py").read_text(encoding="utf-8")
+    window = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
+
+    assert "let pendingMultilinePaste = '';" in html
+    assert "bridge.report_command_batch(submittedPaste)" in html
+    assert "command_batch_submitted = Signal(str)" in widget
+    assert "self._bridge.command_batch_submitted.connect(self._on_command_batch_submitted)" in widget
+    assert "def _terminal_command_batch_submitted" in window
+    assert "split_pasted_shell_commands(command_batch, limit=64)" in window
+    assert "self._persist_terminal_predictor()" in window
