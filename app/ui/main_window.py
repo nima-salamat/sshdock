@@ -4175,6 +4175,9 @@ class MainWindow(QMainWindow):
             self._terminal_pending_command_results[sid] = (
                 parsed[0], server_id, cwd, shell, selected_was_submitted
             )
+            expect_result = getattr(session, "expect_command_result", None)
+            if callable(expect_result):
+                expect_result()
             return
 
         # Enter confirms that this command was submitted. Some shells or custom
@@ -4188,6 +4191,12 @@ class MainWindow(QMainWindow):
             self._command_predictor.record_suggestion_acceptance(
                 parsed[0], server_id=server_id, cwd=cwd, shell=shell
             )
+        # Arm the handshake after every submitted command. A prompt marker that
+        # arrives during startup is ignored, so it cannot falsely enable result
+        # correlation before the first real user command.
+        expect_result = getattr(session, "expect_command_result", None)
+        if callable(expect_result):
+            expect_result()
         self._persist_terminal_predictor()
 
     def _terminal_command_batch_submitted(self, command_batch: str, term) -> None:
@@ -4214,7 +4223,7 @@ class MainWindow(QMainWindow):
                     break
 
         session = self.terms.get(sid) if sid else None
-        if session is None or not getattr(session, "result_reporting_enabled", False):
+        if session is None:
             return
         # Do not overwrite a pending command or batch whose result has not arrived.
         if sid in self._terminal_pending_command_results:
@@ -4233,6 +4242,9 @@ class MainWindow(QMainWindow):
             self._terminal_pending_command_results[sid] = (
                 "\n".join(commands), server_id, cwd, shell, False
             )
+            expect_result = getattr(session, "expect_command_result", None)
+            if callable(expect_result):
+                expect_result()
             return
 
         # Learn submitted batches as well when this session has not demonstrated
@@ -4240,6 +4252,9 @@ class MainWindow(QMainWindow):
         self._command_predictor.add_command(
             "\n".join(commands), server_id=server_id, cwd=cwd, shell=shell
         )
+        expect_result = getattr(session, "expect_command_result", None)
+        if callable(expect_result):
+            expect_result()
         self._persist_terminal_predictor()
 
     def _terminal_command_result(self, sid: str, exit_code: int) -> None:
