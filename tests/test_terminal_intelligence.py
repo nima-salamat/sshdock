@@ -496,7 +496,7 @@ def test_file_explorer_generated_shell_commands_never_enter_ai_suggestions():
 def test_remote_shell_history_parser_drops_explorer_entries_but_keeps_manual_commands():
     from app.terminal.predictor import parse_history_output
 
-    output = "\\n".join([
+    output = "\n".join([
         "__SSHDock_SHELL__=/bin/bash",
         "__BASH__",
         r'''cd '/opt/app' && printf '\\033]7;file://sshdock%s\\007' "$PWD"''',
