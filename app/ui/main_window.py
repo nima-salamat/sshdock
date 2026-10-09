@@ -4151,7 +4151,7 @@ class MainWindow(QMainWindow):
                     break
 
         session = self.terms.get(sid) if sid else None
-        if session is None or not getattr(session, "result_reporting_enabled", False):
+        if session is None:
             return
         # Do not let keystrokes sent to a running foreground application replace
         # the command whose eventual prompt status is still pending.
@@ -4171,9 +4171,24 @@ class MainWindow(QMainWindow):
         selected_was_submitted = (
             len(selected_parts) == 1 and selected_parts[0] == parsed[0]
         )
-        self._terminal_pending_command_results[sid] = (
-            parsed[0], server_id, cwd, shell, selected_was_submitted
+        if getattr(session, "result_reporting_enabled", False):
+            self._terminal_pending_command_results[sid] = (
+                parsed[0], server_id, cwd, shell, selected_was_submitted
+            )
+            return
+
+        # Enter confirms that this command was submitted. Some shells or custom
+        # prompt configurations do not emit our OSC exit-status marker; in that
+        # case, learn the command now rather than leaving the live model unchanged
+        # forever while only the connection-time history is learned.
+        self._command_predictor.add_command(
+            parsed[0], server_id=server_id, cwd=cwd, shell=shell
         )
+        if selected_was_submitted:
+            self._command_predictor.record_suggestion_acceptance(
+                parsed[0], server_id=server_id, cwd=cwd, shell=shell
+            )
+        self._persist_terminal_predictor()
 
     def _terminal_command_batch_submitted(self, command_batch: str, term) -> None:
         """Stage a plain multiline paste until the shell reports a prompt result."""
@@ -4214,9 +4229,18 @@ class MainWindow(QMainWindow):
         shell = self.terminal_shells.get(sid, "")
         # One prompt status may cover the entire multiline readline buffer.
         # Keep the command order as a single pending item until execution is confirmed.
-        self._terminal_pending_command_results[sid] = (
-            "\n".join(commands), server_id, cwd, shell, False
+        if getattr(session, "result_reporting_enabled", False):
+            self._terminal_pending_command_results[sid] = (
+                "\n".join(commands), server_id, cwd, shell, False
+            )
+            return
+
+        # Learn submitted batches as well when this session has not demonstrated
+        # working OSC status reporting. They have no reliable aggregate exit code.
+        self._command_predictor.add_command(
+            "\n".join(commands), server_id=server_id, cwd=cwd, shell=shell
         )
+        self._persist_terminal_predictor()
 
     def _terminal_command_result(self, sid: str, exit_code: int) -> None:
         """Learn submitted commands only after the shell reports a prompt result."""
