@@ -1130,7 +1130,7 @@
         } else {
           requestClipboardPaste();
         }
-      });
+      }, true);
 
       // API for Python
       term.attachCustomKeyEventHandler(function (ev) {
@@ -1421,13 +1421,23 @@
                 openCopyMenu(ev, Number(td.dataset.row), Number(td.dataset.col));
               });
             });
-            document.addEventListener('mousedown', function(ev){
-              const menu = document.getElementById('sshdock-copy-menu');
-              if (menu && !menu.contains(ev.target)) closeCopyMenu();
-            });
-            document.addEventListener('keydown', function(ev){
-              if (ev.key === 'Escape') closeCopyMenu();
-            });
+            // Install one document-level dismiss handler. Per-table handlers race each
+            // other and can remove the menu on mousedown before its Copy action clicks.
+            if (!window._sshdockCopyMenuHandlersInstalled) {
+              window._sshdockCopyMenuHandlersInstalled = true;
+              document.addEventListener('mousedown', function(ev) {
+                const menu = document.getElementById('sshdock-copy-menu');
+                if (menu && !menu.contains(ev.target) && menu.parentNode) {
+                  menu.parentNode.removeChild(menu);
+                }
+              });
+              document.addEventListener('keydown', function(ev) {
+                if (ev.key === 'Escape') {
+                  const menu = document.getElementById('sshdock-copy-menu');
+                  if (menu && menu.parentNode) menu.parentNode.removeChild(menu);
+                }
+              });
+            }
 
             if (table) {
               block.addEventListener('wheel', function(ev){

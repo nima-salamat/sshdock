@@ -519,6 +519,8 @@ def test_terminal_clipboard_shortcuts_and_right_click_are_wired():
     assert "key === 'c'" in html
     assert "key === 'v'" in html
     assert "terminalHost.addEventListener('contextmenu'" in html
+    assert "}, true);" in html
+    assert "window._sshdockCopyMenuHandlersInstalled" in html
     assert "requestClipboardPaste()" in html
     assert "paste: function (data)" in html
     assert "paste_requested = Signal()" in widget
