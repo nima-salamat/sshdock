@@ -4,6 +4,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QDialog, QPushButton, QVBoxLayout
 from qasync import QEventLoop
 
+from app.main import _configure_application_lifecycle
 from app.ui.async_dialogs import await_dialog
 
 
@@ -69,6 +70,32 @@ def test_cancelling_awaited_dialog_closes_it_during_shutdown():
     try:
         with loop:
             loop.run_until_complete(scenario())
+    finally:
+        asyncio.set_event_loop(None)
+
+
+def test_closing_last_startup_dialog_does_not_stop_qasync_early():
+    app = _qt_app()
+    app.setQuitOnLastWindowClosed(True)
+    _configure_application_lifecycle(app)
+    assert app.quitOnLastWindowClosed() is False
+
+    loop = QEventLoop(app)
+    asyncio.set_event_loop(loop)
+
+    async def scenario():
+        dialog = QDialog()
+        QTimer.singleShot(0, dialog.close)
+        result = await await_dialog(dialog)
+        # Yield once to prove the Future and its parent coroutine can finish
+        # after Qt has processed the last-window close event.
+        await asyncio.sleep(0)
+        assert result == int(QDialog.DialogCode.Rejected)
+        return "startup-finished"
+
+    try:
+        with loop:
+            assert loop.run_until_complete(scenario()) == "startup-finished"
     finally:
         asyncio.set_event_loop(None)
 
