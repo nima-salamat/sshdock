@@ -463,3 +463,44 @@ def test_cancelling_input_clears_unsubmitted_suggestion_feedback():
     assert "def report_suggestion_cancelled(" in widget
     assert "def _on_suggestion_cancelled(" in widget
     assert html.count("bridge.report_suggestion_cancelled()") >= 3
+
+
+def test_file_explorer_generated_shell_commands_never_enter_ai_suggestions():
+    from app.terminal.predictor import CommandPredictor, split_shell_commands
+
+    explorer_cd = r'''cd '/opt/django-paas-deployer' && printf '\\033]7;file://sshdock%s\\007' "$PWD"'''
+    explorer_extract = '''sh -c 'printf "[SSHDock] Extracting: %s" "$archive"' '''.strip()
+
+    assert split_shell_commands(explorer_cd) == []
+    assert split_shell_commands(explorer_extract) == []
+
+    predictor = CommandPredictor()
+    assert not predictor.add_command(explorer_cd, server_id="server", cwd="/")
+    assert not predictor.add_command(explorer_extract, server_id="server", cwd="/")
+
+    # These same command families remain eligible when the user types them.
+    assert predictor.add_command("cd /opt/django-paas-deployer", server_id="server", cwd="/")
+    assert predictor.add_command("rm -f -- old.tmp", server_id="server", cwd="/tmp")
+    assert predictor.add_command("vim compose.yml", server_id="server", cwd="/opt/django-paas-deployer")
+    history = predictor.state_dict()["history"]["server"]
+    assert [row["command"] for row in history] == [
+        "cd /opt/django-paas-deployer",
+        "rm -f -- old.tmp",
+        "vim compose.yml",
+    ]
+
+
+def test_remote_shell_history_parser_drops_explorer_entries_but_keeps_manual_commands():
+    from app.terminal.predictor import parse_history_output
+
+    output = "\\n".join([
+        "__SSHDock_SHELL__=/bin/bash",
+        "__BASH__",
+        r'''cd '/opt/app' && printf '\\033]7;file://sshdock%s\\007' "$PWD"''',
+        '''sh -c 'printf "[SSHDock] Extracting: %s" "$archive"' ''',
+        "cd /opt/app",
+        "rm -f -- old.tmp",
+        "vim compose.yml",
+    ])
+    snapshot = parse_history_output(output)
+    assert list(snapshot.commands) == ["cd /opt/app", "rm -f -- old.tmp", "vim compose.yml"]
