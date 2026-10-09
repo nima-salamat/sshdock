@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QInputDialog,
-    QLineEdit,
     QMessageBox,
 )
 
@@ -78,6 +77,7 @@ async def choose_file(
     *,
     save: bool = False,
     directory: str = "",
+    file_name: str = "",
     name_filter: str = "",
 ) -> tuple[str, str]:
     """Return (selected path, selected filter); empty path means cancelled."""
@@ -85,6 +85,8 @@ async def choose_file(
     dialog.setWindowTitle(title)
     if directory:
         dialog.setDirectory(directory)
+    if file_name:
+        dialog.selectFile(file_name)
     if name_filter:
         dialog.setNameFilter(name_filter)
     if save:
