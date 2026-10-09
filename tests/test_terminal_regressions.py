@@ -576,15 +576,23 @@ def test_multiline_paste_parser_keeps_nonempty_commands_in_order_and_ignores_bla
         "git pull --ff-only origin master\r\n"
         "\r\n"
         "docker compose up -d --force-recreate celery deployment-worker\r\n"
-        "\\r\\n"
+        "\r\n"
         "docker compose logs --tail=150 deployment-worker celery"
     )
-    assert split_pasted_shell_commands(pasted) == [
+    expected = [
         "cd /opt/django-paas-deployer",
         "git pull --ff-only origin master",
         "docker compose up -d --force-recreate celery deployment-worker",
         "docker compose logs --tail=150 deployment-worker celery",
     ]
+    assert split_pasted_shell_commands(pasted) == expected
+
+    from app.terminal.predictor import CommandPredictor
+    predictor = CommandPredictor()
+    predictor.add_command("\\n".join(expected), server_id="server", cwd="/root", shell="bash")
+    learned = predictor.state_dict()["history"]["server"]
+    assert [row["command"] for row in learned[-4:]] == expected
+    assert learned[-3]["cwd"] == "/opt/django-paas-deployer"
 
 
 def test_multiline_paste_parser_rejects_compound_lines_and_shell_blocks():
