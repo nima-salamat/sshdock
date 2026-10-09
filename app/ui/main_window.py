@@ -5433,12 +5433,12 @@ class MainWindow(QMainWindow):
                 )
         else:
             details = (r.stderr or r.stdout or "docker run failed").strip()
-            ErrorDialog(
+            await await_dialog(ErrorDialog(
                 "Create container failed",
                 f"Could not create container from «{image}».",
                 f"$ {r.command}\n\n{details}",
                 self,
-            ).exec()
+            ))
 
 
     async def close_async(self):
@@ -5577,9 +5577,9 @@ async def _file_open_selected_row(self,row:int):
         data=open(local,'r',encoding='utf-8',errors='replace').read()
         dlg=QDialog(self); dlg.setWindowTitle(remote); dlg.resize(1000,700)
         lay=QVBoxLayout(dlg); edit=QPlainTextEdit(); edit.setPlainText(data); edit.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu); lay.addWidget(edit)
-        dlg.exec()
+        await await_dialog(dlg)
     except Exception as exc:
-        QMessageBox.warning(self,'Open file',str(exc))
+        await show_message(self, "Open file", str(exc), icon=QMessageBox.Icon.Warning)
 
 async def _file_open_selected(self):
     row=self.file_table.currentRow()
@@ -5596,12 +5596,12 @@ async def _file_download_selected(self):
     from pathlib import Path
     meta=item.data(Qt.ItemDataRole.UserRole) or {}
     remote=meta.get("path") or _resolve_remote_path(self.file_path.text(),item.text())
-    local,_=QFileDialog.getSaveFileName(self,'Download',Path(item.text()).name)
+    local, _ = await choose_file(self, "Download", save=True, directory=Path(item.text()).name)
     if not local:return
     try:
         sftp=await self.manager.servers[self.current_id].ssh.sftp(); await sftp.get(remote,local)
         self.statusBar().showMessage(f'Downloaded {remote}',5000)
-    except Exception as exc: QMessageBox.warning(self,'Download',str(exc))
+    except Exception as exc: await show_message(self, "Download", str(exc), icon=QMessageBox.Icon.Warning)
 
 def _file_context_menu(self,pos):
     item=self.file_table.itemAt(pos); menu=QMenu(self); copy_name=menu.addAction('Copy name'); copy_path=menu.addAction('Copy path'); menu.addSeparator(); open_a=menu.addAction('Open'); dl=menu.addAction('Download')
@@ -5617,22 +5617,22 @@ def _file_context_menu(self,pos):
 async def _file_upload(self):
     if not self.current_id:return
     from PySide6.QtWidgets import QFileDialog
-    local,_=QFileDialog.getOpenFileName(self,"Upload file")
+    local, _ = await choose_file(self, "Upload file")
     if not local:return
     remote=_resolve_remote_path(self.file_path.text(), os.path.basename(local))
     try:
         sftp=await self.manager.servers[self.current_id].ssh.sftp(); await sftp.put(local,remote); await self._file_browser_refresh(); self.statusBar().showMessage(f"Uploaded {remote}",5000)
-    except Exception as exc: QMessageBox.warning(self,"Upload",str(exc))
+    except Exception as exc: await show_message(self, "Upload", str(exc), icon=QMessageBox.Icon.Warning)
 
 async def _file_new_folder(self):
     if not self.current_id:return
     from PySide6.QtWidgets import QInputDialog
-    name,ok=QInputDialog.getText(self,"New folder","Folder name:")
+    name, ok = await input_text(self, "New folder", "Folder name:")
     if not ok or not name.strip():return
     remote=_resolve_remote_path(self.file_path.text(),name.strip())
     try:
         sftp=await self.manager.servers[self.current_id].ssh.sftp(); await sftp.mkdir(remote); await self._file_browser_refresh()
-    except Exception as exc: QMessageBox.warning(self,"New folder",str(exc))
+    except Exception as exc: await show_message(self, "New folder", str(exc), icon=QMessageBox.Icon.Warning)
 
 async def _file_rename_selected(self):
     if not self.current_id:return
@@ -5641,12 +5641,12 @@ async def _file_rename_selected(self):
     item=self.file_table.item(row,0)
     if not item:return
     from PySide6.QtWidgets import QInputDialog
-    name,ok=QInputDialog.getText(self,"Rename","New name:",text=item.text())
+    name, ok = await input_text(self, "Rename", "New name:", text=item.text())
     if not ok or not name.strip():return
     old=_resolve_remote_path(self.file_path.text(),item.text()); new=_resolve_remote_path(self.file_path.text(),name.strip())
     try:
         sftp=await self.manager.servers[self.current_id].ssh.sftp(); await sftp.rename(old,new); await self._file_browser_refresh()
-    except Exception as exc: QMessageBox.warning(self,"Rename",str(exc))
+    except Exception as exc: await show_message(self, "Rename", str(exc), icon=QMessageBox.Icon.Warning)
 
 async def _file_delete_selected(self):
     if not self.current_id:return
@@ -5654,14 +5654,14 @@ async def _file_delete_selected(self):
     if row<0:return
     item=self.file_table.item(row,0); typ=self.file_table.item(row,1).text() if self.file_table.item(row,1) else "File"
     if not item:return
-    if QMessageBox.question(self,"Delete",f"Delete {item.text()}?") != QMessageBox.StandardButton.Yes:return
+    if not await ask_yes_no(self, "Delete", f"Delete {item.text()}?"):return
     remote=_resolve_remote_path(self.file_path.text(),item.text())
     try:
         sftp=await self.manager.servers[self.current_id].ssh.sftp()
         if typ=="Directory": await sftp.rmtree(remote)
         else: await sftp.remove(remote)
         await self._file_browser_refresh()
-    except Exception as exc: QMessageBox.warning(self,"Delete",str(exc))
+    except Exception as exc: await show_message(self, "Delete", str(exc), icon=QMessageBox.Icon.Warning)
 
 MainWindow._file_upload=_file_upload
 MainWindow._file_new_folder=_file_new_folder
