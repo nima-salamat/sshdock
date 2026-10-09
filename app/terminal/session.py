@@ -47,6 +47,8 @@ class TerminalSession(QObject):
         self.cwd = "/"
         self.result_reporting_enabled = False
         self._osc_buf = b""  # carry partial OSC sequences across reads
+        self._internal_echo_pending = False
+        self._internal_echo_buffer = b""
         self._reconnect_task: asyncio.Task | None = None
         self._reconnect_lock = asyncio.Lock()
 
@@ -252,7 +254,39 @@ class TerminalSession(QObject):
                 if payload:
                     self.magic_command.emit(payload)
             cleaned = cleaned[: match.start()] + cleaned[match.end() :]
+        if self._internal_echo_pending:
+            cleaned = self._hide_internal_history_marker_echo(cleaned)
         return cleaned
+
+    def _hide_internal_history_marker_echo(self, data: bytes) -> bytes:
+        """Remove the internal-history comment from the echoed command, not from shell history."""
+        marker = b" # __sshdock_internal__"
+        buffered = self._internal_echo_buffer + data
+        self._internal_echo_buffer = b""
+
+        # The command echo is the first line after write_internal_command().
+        # Handle fragmented SSH reads without delaying normal terminal output.
+        line_end = buffered.find(b"\\n")
+        search_end = len(buffered) if line_end < 0 else line_end + 1
+        marker_at = buffered.find(marker, 0, search_end)
+        if marker_at >= 0:
+            self._internal_echo_pending = False
+            return buffered[:marker_at] + buffered[marker_at + len(marker):]
+
+        if line_end >= 0:
+            self._internal_echo_pending = False
+            return buffered
+
+        # Hold only a suffix that could be the start of the marker.
+        hold = 0
+        for size in range(min(len(marker) - 1, len(buffered)), 0, -1):
+            if buffered.endswith(marker[:size]):
+                hold = size
+                break
+        if hold:
+            self._internal_echo_buffer = buffered[-hold:]
+            return buffered[:-hold]
+        return buffered
 
     @staticmethod
     def _normalize_osc_path(raw: str) -> str:
@@ -302,6 +336,19 @@ class TerminalSession(QObject):
         if self._closing or not self.channel or self.channel.closed or not self.running:
             return
         await asyncio.wait_for(self.channel.write(data), timeout=5.0)
+
+    async def write_internal_command(self, data: bytes):
+        """Write an app-triggered shell command and hide its history tag from terminal echo."""
+        if self._closing or not self.channel or self.channel.closed or not self.running:
+            return
+        self._internal_echo_pending = True
+        self._internal_echo_buffer = b""
+        try:
+            await self.write(data)
+        except Exception:
+            self._internal_echo_pending = False
+            self._internal_echo_buffer = b""
+            raise
 
     async def resize(self, cols: int, rows: int):
         if self._closing or not self.channel or self.channel.closed:
