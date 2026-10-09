@@ -515,7 +515,8 @@ def test_terminal_clipboard_shortcuts_and_right_click_are_wired():
     widget = (ROOT / "app/terminal/web_widget.py").read_text(encoding="utf-8")
 
     assert "term.hasSelection()" in html
-    assert "copyTextToClipboard(term.getSelection())" in html
+    assert "copyTextToClipboard(selected)" in html
+    assert "copyAndClearTerminalSelection()" in html
     assert "key === 'c'" in html
     assert "key === 'v'" in html
     assert "terminalHost.addEventListener('contextmenu'" in html
