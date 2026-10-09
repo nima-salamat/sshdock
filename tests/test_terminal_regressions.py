@@ -529,7 +529,7 @@ def test_terminal_clipboard_shortcuts_and_right_click_are_wired():
 
 def test_magic_table_copy_cell_row_and_entire_table_use_real_cell_coordinates():
     html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
-    assert 'data-row="'+rowIdx+'" data-col="'+i+'"' in html
+    assert """data-row="'+rowIdx+'" data-col="'+i+'"'""" in html
     assert "function tableText()" in html
     assert "sshdock-copy-table" in html
     assert "copyText(tableText())" in html
