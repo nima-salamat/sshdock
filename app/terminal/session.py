@@ -31,6 +31,7 @@ class TerminalSession(QObject):
     cwd_changed = Signal(str)  # emitted when shell reports a new working directory
     magic_command = Signal(str)  # mdocker / docker --magic
     command_result = Signal(int)  # shell exit status reported immediately before a prompt
+    command_result_missing = Signal()  # prompt reached but the exit-status marker was absent
 
     def __init__(self, ssh: SSHServerConnection, title: str, owned_transport: SSHServerConnection | None = None):
         super().__init__()
@@ -46,6 +47,7 @@ class TerminalSession(QObject):
         self._close_lock = asyncio.Lock()
         self.cwd = "/"
         self.result_reporting_enabled = False
+        self._awaiting_command_result = False
         self._osc_buf = b""  # carry partial OSC sequences across reads
         self._internal_echo_pending = False
         self._internal_echo_buffer = b""
@@ -56,6 +58,10 @@ class TerminalSession(QObject):
         if self.running or self.channel:
             return
         self._closing = False
+        # Ignore startup prompt markers. Live result reporting becomes trusted only
+        # after a marker arrives for an explicitly submitted user command.
+        self.result_reporting_enabled = False
+        self._awaiting_command_result = False
         self.status.emit("● Connecting…")
         try:
             # Open the user's normal interactive shell first. This preserves
@@ -111,7 +117,6 @@ class TerminalSession(QObject):
             shell_name = (getattr(shell_probe, "stdout", "") or "").strip().lower()
         except Exception:
             shell_name = ""
-        self.result_reporting_enabled = shell_name in {"bash", "zsh", "fish"}
 
         if shell_name == "bash":
             setup = (
@@ -213,6 +218,10 @@ class TerminalSession(QObject):
                 except Exception:
                     pass
 
+    def expect_command_result(self) -> None:
+        """Arm exit-status correlation for the next prompt after a user submission."""
+        self._awaiting_command_result = True
+
     def _extract_cwd(self, data: bytes) -> bytes:
         """Parse OSC 7 (cwd) + OSC 777 magic; strip magic from stream."""
         blob = self._osc_buf + data
@@ -225,7 +234,8 @@ class TerminalSession(QObject):
                     self._osc_buf = incomplete
                     blob = blob[:tail_start]
                     break
-        for match in _OSC7_RE.finditer(blob):
+        cwd_markers = list(_OSC7_RE.finditer(blob))
+        for match in cwd_markers:
             raw = match.group(1).decode("utf-8", "replace")
             path = self._normalize_osc_path(raw)
             if path and path != self.cwd:
@@ -234,13 +244,30 @@ class TerminalSession(QObject):
 
         # Read status markers before stripping them from the PTY stream.
         # They are emitted by the shell's prompt hook, after the command exits.
+        valid_results: list[int] = []
         for match in _OSC_RESULT_RE.finditer(blob):
             try:
                 exit_code = int(match.group(1))
             except (TypeError, ValueError):
                 continue
             if 0 <= exit_code <= 255:
-                self.command_result.emit(exit_code)
+                valid_results.append(exit_code)
+
+        if self._awaiting_command_result:
+            if valid_results:
+                # A marker during shell startup is not proof that online
+                # command/result correlation is working. Only a marker associated
+                # with an actual submitted command enables the optimized path.
+                self.result_reporting_enabled = True
+                self._awaiting_command_result = False
+                self.command_result.emit(valid_results[-1])
+            elif cwd_markers:
+                # We reached a new prompt, but this integration did not report the
+                # exit code. Release the waiting command into history-only learning
+                # so one missing OSC result can never block all future learning.
+                self.result_reporting_enabled = False
+                self._awaiting_command_result = False
+                self.command_result_missing.emit()
 
         cleaned = blob
         special_matches = sorted(
@@ -385,6 +412,10 @@ class TerminalSession(QObject):
                 if self._closing or self._closed_emitted:
                     return
                 self.status.emit("● Reconnecting…")
+                # A new PTY must prove its own result-reporting hook. Never
+                # carry learned transport capability across reconnects.
+                self.result_reporting_enabled = False
+                self._awaiting_command_result = False
                 try:
                     if not self.ssh.is_connected:
                         await self.ssh.connect(with_worker_pool=False, with_command_transport=False)

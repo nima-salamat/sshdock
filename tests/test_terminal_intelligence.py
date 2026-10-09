@@ -353,6 +353,18 @@ def test_terminal_history_learning_yields_between_batches_and_saves_off_thread()
 
 
 
+
+def test_multiline_batch_learning_has_a_fallback_without_result_reporting():
+    main = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
+    start = main.index("def _terminal_command_batch_submitted(")
+    end = main.index("def _terminal_command_result(", start)
+    submitted = main[start:end]
+    assert "if session is None:" in submitted
+    assert 'if session is None or not getattr(session, "result_reporting_enabled", False):' not in submitted
+    assert 'if getattr(session, "result_reporting_enabled", False):' in submitted
+    assert 'self._command_predictor.add_command(' in submitted
+    assert "expect_command_result" in submitted
+
 def test_terminal_session_reports_and_strips_shell_exit_status():
     from app.terminal.session import TerminalSession
 
@@ -360,12 +372,45 @@ def test_terminal_session_reports_and_strips_shell_exit_status():
     results = []
     session.command_result.connect(results.append)
 
+    # Startup prompts are ignored until a real command has been submitted.
+    visible = session._extract_cwd(
+        b"startup\x1b]777;sshdock-result;0\x07prompt"
+    )
+    assert visible == b"startupprompt"
+    assert not session.result_reporting_enabled
+    assert results == []
+
+    session.expect_command_result()
     visible = session._extract_cwd(
         b"command output\x1b]777;sshdock-result;7\x07prompt"
     )
 
     assert visible == b"command outputprompt"
+    assert session.result_reporting_enabled
     assert results == [7]
+
+
+
+def test_terminal_session_recovers_when_prompt_marker_has_no_exit_status():
+    from app.terminal.session import TerminalSession
+
+    session = TerminalSession(ssh=None, title="test")
+    missing = []
+    session.command_result_missing.connect(lambda: missing.append(True))
+    session.result_reporting_enabled = True
+    session.expect_command_result()
+
+    visible = session._extract_cwd(
+        b"output\x1b]7;file://sshdock/opt/app\x07prompt"
+    )
+
+    # OSC 7 remains in the PTY stream for xterm.js; the Python parser consumes
+    # it for cwd tracking without treating it as an exit-status marker.
+    assert visible == b"output\x1b]7;file://sshdock/opt/app\x07prompt"
+    assert session.cwd == "/opt/app"
+    assert not session.result_reporting_enabled
+    assert not session._awaiting_command_result
+    assert missing == [True]
 
 
 def test_terminal_session_handles_split_exit_status_marker():
@@ -375,18 +420,27 @@ def test_terminal_session_handles_split_exit_status_marker():
     results = []
     session.command_result.connect(results.append)
 
+    session.expect_command_result()
+    assert not session.result_reporting_enabled
     first = session._extract_cwd(b"output\x1b]777;sshdock-result;1")
+    assert not session.result_reporting_enabled
     second = session._extract_cwd(b"\x07prompt")
 
     assert first == b"output"
     assert second == b"prompt"
+    assert session.result_reporting_enabled
     assert results == [1]
 
 
 def test_shell_integration_emits_exit_status_for_supported_shells():
     src = (ROOT / "app/terminal/session.py").read_text(encoding="utf-8")
 
-    assert 'self.result_reporting_enabled = shell_name in {"bash", "zsh", "fish"}' in src
+    assert "def expect_command_result(self) -> None:" in src
+    assert "self._awaiting_command_result = True" in src
+    assert "if self._awaiting_command_result:" in src
+    assert "if 0 <= exit_code <= 255:" in src
+    assert "elif cwd_markers:" in src
+    assert "self.result_reporting_enabled = True" in src
     assert src.count("sshdock-result;%s") >= 3
     assert "precmd_functions=(__sshdock_cwd" in src
     assert "set -l __sshdock_status $status" in src
@@ -402,10 +456,15 @@ def test_terminal_learning_waits_for_real_shell_result():
     )[0]
 
     assert "_terminal_pending_command_results[sid]" in submitted
-    assert "_command_predictor.add_command(" not in submitted
+    assert 'if getattr(session, "result_reporting_enabled", False):' in submitted
+    assert "self._command_predictor.add_command(" in submitted
+    assert "expect_command_result" in submitted
+    assert "self._persist_terminal_predictor()" in submitted
     assert "record_command_result(" in result
     assert "success=int(exit_code) == 0" in result
     assert "session.command_result.connect(" in main
+    assert "session.command_result_missing.connect(" in main
+    assert "def _terminal_command_result_missing(" in main
 
 
 
