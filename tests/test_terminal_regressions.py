@@ -537,3 +537,28 @@ def test_magic_table_copy_cell_row_and_entire_table_use_real_cell_coordinates():
     assert "copyText(tableText())" in html
     assert "Copy cell" in html
     assert "Copy row" in html
+
+
+def test_terminal_selection_copy_deselects_for_mouse_enter_and_ctrl_c():
+    html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    assert "function copyAndClearTerminalSelection()" in html
+    assert "term.clearSelection()" in html
+    assert "terminalHost.addEventListener('mousedown'" in html
+    assert "terminalHost.addEventListener('contextmenu'" in html
+    assert "key === 'enter' && term.hasSelection()" in html
+    assert "copyAndClearTerminalSelection();" in html
+
+
+def test_copy_terminal_exports_scrollback_with_html_tables_at_anchor_positions():
+    html = (ROOT / "app/terminal/web/terminal.html").read_text(encoding="utf-8")
+    widget = (ROOT / "app/terminal/web_widget.py").read_text(encoding="utf-8")
+    window = (ROOT / "app/ui/main_window.py").read_text(encoding="utf-8")
+    assert "copyAllOutput: function ()" in html
+    assert "term.buffer.normal" in html
+    assert "block._anchorMarker.line" in html
+    assert "markerLine - cells" in html
+    assert "lines.splice.apply(lines" in html
+    assert "rows.map(function(text) { return { text: text, wrapped: false }; })" in html
+    assert "def copy_all_output(self) -> None:" in widget
+    assert "window.sshdockTerm.copyAllOutput" in widget
+    assert "term.copy_all_output()" in window

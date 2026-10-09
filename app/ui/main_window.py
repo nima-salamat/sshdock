@@ -3043,9 +3043,11 @@ class MainWindow(QMainWindow):
         term = self._current_terminal_widget()
         if term is None:
             return
+        if isinstance(term, XtermTerminalWidget):
+            term.copy_all_output()
+            return
         if hasattr(term, "toPlainText"):
             QApplication.clipboard().setText(term.toPlainText())
-        # xterm.js selection is handled inside the web view (Ctrl+Shift+C / context)
 
     def _clear_current_terminal(self):
         term = self._current_terminal_widget()

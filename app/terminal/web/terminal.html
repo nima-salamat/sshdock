@@ -1120,26 +1120,45 @@
         } catch (e) {}
       }
 
+      function copyAndClearTerminalSelection() {
+        if (!term.hasSelection()) return false;
+        const selected = term.getSelection();
+        copyTextToClipboard(selected);
+        try { term.clearSelection(); } catch (e) {}
+        return true;
+      }
+
+      // Clicking again after selecting text copies the selection and removes
+      // the highlight; capture phase ensures xterm cannot eat the click first.
+      terminalHost.addEventListener('mousedown', function(ev) {
+        const target = ev.target;
+        if (ev.button !== 0) return;
+        if (target && target.closest && target.closest('.sshdock-tbl, #sshdock-suggestions')) return;
+        copyAndClearTerminalSelection();
+      }, true);
+
       terminalHost.addEventListener('contextmenu', function(ev) {
         const target = ev.target;
         if (target && target.closest && target.closest('.sshdock-tbl, #sshdock-suggestions')) return;
         ev.preventDefault();
         ev.stopPropagation();
-        if (term.hasSelection()) {
-          copyTextToClipboard(term.getSelection());
-        } else {
-          requestClipboardPaste();
-        }
+        if (!copyAndClearTerminalSelection()) requestClipboardPaste();
       }, true);
 
       // API for Python
       term.attachCustomKeyEventHandler(function (ev) {
         const key = String(ev.key || '').toLowerCase();
+        if (ev.type === 'keydown' && key === 'enter' && term.hasSelection()) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          copyAndClearTerminalSelection();
+          return false;
+        }
         if (ev.type === 'keydown' && ev.ctrlKey && !ev.altKey && !ev.metaKey &&
             (key === 'c' || ev.code === 'KeyC') && term.hasSelection()) {
           ev.preventDefault();
           ev.stopPropagation();
-          copyTextToClipboard(term.getSelection());
+          copyAndClearTerminalSelection();
           return false;
         }
         // Keep Ctrl+C native when no text is selected so shells still receive SIGINT.
@@ -1259,6 +1278,71 @@
           const target = Math.max(0, Math.round(Number(line) || 0));
           try { term.scrollToLine(target); } catch (e) {}
           reportScrollState();
+        },
+        copyAllOutput: function () {
+          try {
+            // Read xterm's normal scrollback buffer, not a widget placeholder or
+            // just the active viewport. HTML result tables are overlays, so replace
+            // their reserved blank-line ranges with TSV at the exact marker line.
+            const buffer = term.buffer && term.buffer.normal;
+            if (!buffer) return copyTextToClipboard('');
+            const lines = [];
+            for (let i = 0; i < buffer.length; i++) {
+              const line = buffer.getLine(i);
+              lines.push({
+                text: line ? line.translateToString(true) : '',
+                wrapped: !!(line && line.isWrapped)
+              });
+            }
+
+            const tables = (window._sshdockTbls || []).map(function(block) {
+              if (!block || !block.querySelector('table')) return null;
+              const table = block.querySelector('table');
+              const rows = [];
+              const headers = Array.from(table.querySelectorAll('thead th')).map(function(th) {
+                return th.textContent || '';
+              });
+              if (headers.length) rows.push(headers.join('\t'));
+              table.querySelectorAll('tbody tr').forEach(function(tr) {
+                rows.push(Array.from(tr.children).map(function(td) {
+                  return td.textContent || '';
+                }).join('\t'));
+              });
+
+              const cells = Math.max(0, Number(block._cells) || 0);
+              const markerLine = block._anchorMarker ? Number(block._anchorMarker.line) : -1;
+              const start = markerLine >= 0
+                ? markerLine - cells
+                : Number(block._startAbs);
+              if (!Number.isFinite(start)) return null;
+              return {
+                start: Math.max(0, Math.min(lines.length, Math.floor(start))),
+                cells: cells,
+                rows: rows
+              };
+            }).filter(Boolean).sort(function(a, b) {
+              // Apply from bottom to top so earlier buffer indexes remain stable.
+              return b.start - a.start;
+            });
+
+            tables.forEach(function(entry) {
+              lines.splice.apply(lines, [entry.start, entry.cells].concat(
+                entry.rows.map(function(text) { return { text: text, wrapped: false }; })
+              ));
+            });
+
+            // Rejoin terminal soft-wrapped lines, but keep table rows as separate
+            // lines. This preserves command/output order for text editors and shells.
+            const logical = [];
+            lines.forEach(function(line) {
+              if (line.wrapped && logical.length) logical[logical.length - 1] += line.text;
+              else logical.push(line.text);
+            });
+            return copyTextToClipboard(logical.join('\n').replace(/\n+$/, ''));
+          } catch (e) {
+            console.error('copyAllOutput', e);
+            return false;
+          }
         },
         showTable: function (payload) {
           try {

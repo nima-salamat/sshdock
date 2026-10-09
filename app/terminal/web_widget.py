@@ -609,6 +609,15 @@ class XtermTerminalWidget(QWidget):
             return
         self._write_js(text)
 
+    def copy_all_output(self) -> None:
+        """Copy complete xterm scrollback, including embedded HTML result tables."""
+        if not self._ready:
+            return
+        self._run_js(
+            "window.sshdockTerm && window.sshdockTerm.copyAllOutput && "
+            "window.sshdockTerm.copyAllOutput();"
+        )
+
     def show_table(self, title: str, columns: list, rows: list, command: str | None = None) -> None:
         """Show Qt/HTML result block inside the terminal page."""
         import json
