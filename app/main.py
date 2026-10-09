@@ -20,7 +20,10 @@ def _qt_message_handler(mode: QtMsgType, context, message: str) -> None:
     logging.getLogger("qt").log(level, "Qt message: %s", message)
 
 
-def _install_process_signal_handlers(app: QApplication) -> tuple[dict[int, object], callable]:
+def _install_process_signal_handlers(
+    app: QApplication,
+    main_task: asyncio.Task | None = None,
+) -> tuple[dict[int, object], callable]:
     """Route process termination signals through the normal Qt shutdown path.
 
     SIGINT (Ctrl+C from the console) must not bypass MainWindow.closeEvent:
@@ -57,7 +60,12 @@ def _install_process_signal_handlers(app: QApplication) -> tuple[dict[int, objec
                 widget.close()
                 return
 
-        app.quit()
+        # Never call app.quit() while run_until_complete() is waiting for
+        # async_main: that stops Qt before the asyncio Future can finish.
+        # At this point there is no visible window left to close, so cancel
+        # the application coroutine and let run_until_complete unwind cleanly.
+        if main_task is not None and not main_task.done():
+            main_task.cancel()
 
     def handler(signum, frame) -> None:
         del frame
@@ -110,10 +118,17 @@ def main() -> None:
     _configure_application_lifecycle(app)
     loop = QEventLoop(app)
     asyncio.set_event_loop(loop)
-    _previous_signal_handlers, restore_signal_handlers = _install_process_signal_handlers(app)
+    # Keep an explicit Task so a termination signal never stops the Qt event
+    # loop underneath run_until_complete() while async_main is still pending.
+    main_task = loop.create_task(async_main(app), name="sshdock-application")
+    _previous_signal_handlers, restore_signal_handlers = _install_process_signal_handlers(app, main_task)
     with loop:
         try:
-            loop.run_until_complete(async_main(app))
+            loop.run_until_complete(main_task)
+        except asyncio.CancelledError:
+            # A termination signal arrived during a window-less startup/teardown
+            # transition. The task was cancelled intentionally; exit normally.
+            pass
         except KeyboardInterrupt:
             pass
         except Exception as exc:
