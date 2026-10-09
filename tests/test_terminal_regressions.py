@@ -572,10 +572,10 @@ def test_multiline_paste_parser_keeps_nonempty_commands_in_order_and_ignores_bla
     from app.terminal.predictor import split_pasted_shell_commands
 
     pasted = (
-        "cd /opt/django-paas-deployer\\r\\n"
-        "git pull --ff-only origin master\\r\\n"
-        "\\r\\n"
-        "docker compose up -d --force-recreate celery deployment-worker\\r\\n"
+        "cd /opt/django-paas-deployer\r\n"
+        "git pull --ff-only origin master\r\n"
+        "\r\n"
+        "docker compose up -d --force-recreate celery deployment-worker\r\n"
         "\\r\\n"
         "docker compose logs --tail=150 deployment-worker celery"
     )
@@ -590,8 +590,8 @@ def test_multiline_paste_parser_keeps_nonempty_commands_in_order_and_ignores_bla
 def test_multiline_paste_parser_rejects_compound_lines_and_shell_blocks():
     from app.terminal.predictor import split_pasted_shell_commands
 
-    assert split_pasted_shell_commands("cd /opt/app && git status\\npwd") == []
-    assert split_pasted_shell_commands("if true; then\\n  pwd\\nfi") == []
+    assert split_pasted_shell_commands("cd /opt/app && git status\npwd") == []
+    assert split_pasted_shell_commands("if true; then\n  pwd\nfi") == []
 
 
 def test_multiline_paste_is_staged_until_enter_and_learned_from_prompt_result():
