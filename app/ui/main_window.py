@@ -4358,6 +4358,11 @@ class MainWindow(QMainWindow):
             browser.set_cwd(normalized, refresh=True)
 
     def _set_terminal_status(self, sid, text):
+        # A disconnected PTY cannot deliver the pending prompt marker. Clear the
+        # correlation slot so a reconnect cannot freeze online command learning.
+        lowered_status = str(text or "").casefold()
+        if any(word in lowered_status for word in ("reconnecting", "disconnected", "failed")):
+            self._terminal_pending_command_results.pop(sid, None)
         self.terminal_status[sid] = text
         meta = self.terminal_meta.get(sid)
         if meta:
