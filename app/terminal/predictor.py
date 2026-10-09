@@ -352,6 +352,8 @@ def _is_sshdock_internal_command(command: str, words: list[str] | None = None) -
     lowered_value = value.casefold()
     if any(marker in lowered_value for marker in (
         "__sshdock_", "sshdock-magic", "sshdock-result", ".cache/sshdock/",
+        # Explorer-generated shell entries must not pollute learned suggestions.
+        "file://sshdock", "[sshdock] extracting:",
     )):
         return True
 
@@ -381,6 +383,9 @@ def split_shell_commands(command: str, *, limit: int = 64) -> list[str]:
     lowered_input = safe_input.casefold()
     if any(marker in lowered_input for marker in (
         "__sshdock_", "sshdock-magic", "sshdock-result", ".cache/sshdock/",
+        # These signatures are emitted only by SSHDock Explorer actions sent
+        # into the interactive shell; regular user cd/rm/editor commands remain learnable.
+        "file://sshdock", "[sshdock] extracting:",
     )):
         return []
 
