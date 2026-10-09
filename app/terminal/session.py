@@ -31,6 +31,7 @@ class TerminalSession(QObject):
     cwd_changed = Signal(str)  # emitted when shell reports a new working directory
     magic_command = Signal(str)  # mdocker / docker --magic
     command_result = Signal(int)  # shell exit status reported immediately before a prompt
+    command_result_missing = Signal()  # prompt reached but the exit-status marker was absent
 
     def __init__(self, ssh: SSHServerConnection, title: str, owned_transport: SSHServerConnection | None = None):
         super().__init__()
@@ -233,7 +234,8 @@ class TerminalSession(QObject):
                     self._osc_buf = incomplete
                     blob = blob[:tail_start]
                     break
-        for match in _OSC7_RE.finditer(blob):
+        cwd_markers = list(_OSC7_RE.finditer(blob))
+        for match in cwd_markers:
             raw = match.group(1).decode("utf-8", "replace")
             path = self._normalize_osc_path(raw)
             if path and path != self.cwd:
@@ -242,18 +244,30 @@ class TerminalSession(QObject):
 
         # Read status markers before stripping them from the PTY stream.
         # They are emitted by the shell's prompt hook, after the command exits.
+        valid_results: list[int] = []
         for match in _OSC_RESULT_RE.finditer(blob):
             try:
                 exit_code = int(match.group(1))
             except (TypeError, ValueError):
                 continue
-            if 0 <= exit_code <= 255 and self._awaiting_command_result:
+            if 0 <= exit_code <= 255:
+                valid_results.append(exit_code)
+
+        if self._awaiting_command_result:
+            if valid_results:
                 # A marker during shell startup is not proof that online
                 # command/result correlation is working. Only a marker associated
                 # with an actual submitted command enables the optimized path.
                 self.result_reporting_enabled = True
                 self._awaiting_command_result = False
-                self.command_result.emit(exit_code)
+                self.command_result.emit(valid_results[-1])
+            elif cwd_markers:
+                # We reached a new prompt, but this integration did not report the
+                # exit code. Release the waiting command into history-only learning
+                # so one missing OSC result can never block all future learning.
+                self.result_reporting_enabled = False
+                self._awaiting_command_result = False
+                self.command_result_missing.emit()
 
         cleaned = blob
         special_matches = sorted(
