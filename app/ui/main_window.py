@@ -33,7 +33,10 @@ from app.ui.notifications import NotificationBus, ToastHost, NotificationBell
 from app.ui.styles import theme_stylesheet, DARK, LIGHT
 from app.terminal.web_widget import create_terminal_widget, XtermTerminalWidget, HAS_WEBENGINE
 from app.terminal.emulator import TerminalWidget  # fallback / type checks
-from app.terminal.predictor import CommandPredictor, load_remote_history, split_shell_commands
+from app.terminal.predictor import (
+    CommandPredictor, load_remote_history, split_shell_commands,
+    split_pasted_shell_commands,
+)
 from app.files.browser import RemoteFileBrowser, ServerFileBackend, ContainerFileBackend
 from app.files.terminal_explorer import TerminalFileExplorer
 from app.ui.docker_results_table import DockerResultsTable
@@ -103,8 +106,8 @@ class MainWindow(QMainWindow):
         self.terminal_status: dict[str, str] = {}
         self.terminal_server_ids: dict[str, str] = {}
         self.terminal_shells: dict[str, str] = {}
-        # One outstanding command per session: the shell reports its exit code
-        # at the next prompt, and that result is correlated with this snapshot.
+        # One outstanding command or confirmed paste batch per session. The
+        # shell's next prompt result confirms the submitted input.
         self._terminal_pending_command_results: dict[str, tuple[str, str, str, str, bool]] = {}
         self._terminal_selected_suggestions: dict[str, str] = {}
         self._command_predictor = CommandPredictor()
@@ -4164,22 +4167,71 @@ class MainWindow(QMainWindow):
             parsed[0], server_id, cwd, shell, selected_was_submitted
         )
 
+    def _terminal_command_batch_submitted(self, command_batch: str, term) -> None:
+        """Stage a plain multiline paste until the shell reports a prompt result."""
+        if not command_batch:
+            return
+        sid = next(
+            (key for key, widget in self.terminal_widgets.items()
+             if widget is term.parentWidget()),
+            None,
+        )
+        if sid is None:
+            for key, page in self.terminal_widgets.items():
+                try:
+                    if term is page or term.isAncestorOf(page):
+                        sid = key
+                        break
+                except Exception:
+                    continue
+        if sid is None:
+            for key, page in self.terminal_widgets.items():
+                if term is page or term.parentWidget() is page:
+                    sid = key
+                    break
+
+        session = self.terms.get(sid) if sid else None
+        if session is None or not getattr(session, "result_reporting_enabled", False):
+            return
+        # Do not overwrite a pending command or batch whose result has not arrived.
+        if sid in self._terminal_pending_command_results:
+            return
+        commands = split_pasted_shell_commands(command_batch, limit=64)
+        if not commands:
+            return
+
+        self._terminal_selected_suggestions.pop(sid, None)
+        server_id = self.terminal_server_ids.get(sid, self.current_id or "")
+        cwd = getattr(session, "cwd", "/") or "/"
+        shell = self.terminal_shells.get(sid, "")
+        # One prompt status may cover the entire multiline readline buffer.
+        # Keep the command order as a single pending item until execution is confirmed.
+        self._terminal_pending_command_results[sid] = (
+            "\n".join(commands), server_id, cwd, shell, False
+        )
+
     def _terminal_command_result(self, sid: str, exit_code: int) -> None:
-        """Learn from a command only after its shell prompt reports the real exit code."""
+        """Learn submitted commands only after the shell reports a prompt result."""
         pending = self._terminal_pending_command_results.pop(sid, None)
         if pending is None:
             return
         command, server_id, cwd, shell, was_suggested = pending
+        parsed = split_shell_commands(command, limit=64)
+        if not parsed:
+            return
         self._command_predictor.add_command(
             command, server_id=server_id, cwd=cwd, shell=shell
         )
-        if was_suggested:
-            self._command_predictor.record_suggestion_acceptance(
-                command, server_id=server_id, cwd=cwd, shell=shell
+        # A multiline paste may return only one final status. Do not attribute
+        # that aggregate status to every command in the batch.
+        if len(parsed) == 1:
+            if was_suggested:
+                self._command_predictor.record_suggestion_acceptance(
+                    parsed[0], server_id=server_id, cwd=cwd, shell=shell
+                )
+            self._command_predictor.record_command_result(
+                parsed[0], success=int(exit_code) == 0, server_id=server_id
             )
-        self._command_predictor.record_command_result(
-            command, success=int(exit_code) == 0, server_id=server_id
-        )
         self._persist_terminal_predictor()
 
     def _terminal_suggestion_accepted(self, command: str, term) -> None:
