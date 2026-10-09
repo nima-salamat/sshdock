@@ -3204,7 +3204,11 @@ class MainWindow(QMainWindow):
             return
         kind, payload = chosen.data()
         if kind == "shell" and session.running:
-            self._spawn(session.write((str(payload) + "\r").encode("utf-8")), name="Terminal suggestion")
+            # UI-triggered commands are deliberately tagged in remote shell history.
+            # The predictor rejects __sshdock_* entries, while manually typed commands
+            # like pwd/ls/git status remain eligible for learning.
+            command = str(payload).rstrip() + " # __sshdock_internal__\r"
+            self._spawn(session.write(command.encode("utf-8")), name="Terminal suggestion")
 
     def _on_terminal_magic_resize(self, sid: str, cols: int):
         # HTML overlay reflows with CSS — no re-query / re-print on resize.
@@ -3940,7 +3944,11 @@ class MainWindow(QMainWindow):
             await session.resize(cols, rows)
             if command:
                 import shlex as _shlex
-                await session.write((" ".join(_shlex.quote(x) for x in command) + "\r").encode("utf-8"))
+                # This command was launched by an SSHDock action (e.g. opening a
+                # container shell), not typed by the user. Keep it out of AI history.
+                command_line = " ".join(_shlex.quote(x) for x in command)
+                command_line += " # __sshdock_internal__\r"
+                await session.write(command_line.encode("utf-8"))
             self._refresh_terminal_selector(session.id)
             self.terminal_stack.setCurrentWidget(page)
             term.setFocus(Qt.FocusReason.OtherFocusReason)
