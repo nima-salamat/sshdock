@@ -46,6 +46,7 @@ class TerminalSession(QObject):
         self._close_lock = asyncio.Lock()
         self.cwd = "/"
         self.result_reporting_enabled = False
+        self.result_reporting_supported = False
         self._osc_buf = b""  # carry partial OSC sequences across reads
         self._internal_echo_pending = False
         self._internal_echo_buffer = b""
@@ -56,6 +57,10 @@ class TerminalSession(QObject):
         if self.running or self.channel:
             return
         self._closing = False
+        # A supported shell is not proof that its prompt hook is actually active.
+        # Re-validate after every connection/reconnect by observing the real OSC marker.
+        self.result_reporting_enabled = False
+        self.result_reporting_supported = False
         self.status.emit("● Connecting…")
         try:
             # Open the user's normal interactive shell first. This preserves
@@ -111,7 +116,7 @@ class TerminalSession(QObject):
             shell_name = (getattr(shell_probe, "stdout", "") or "").strip().lower()
         except Exception:
             shell_name = ""
-        self.result_reporting_enabled = shell_name in {"bash", "zsh", "fish"}
+        self.result_reporting_supported = shell_name in {"bash", "zsh", "fish"}
 
         if shell_name == "bash":
             setup = (
@@ -240,6 +245,10 @@ class TerminalSession(QObject):
             except (TypeError, ValueError):
                 continue
             if 0 <= exit_code <= 255:
+                # Only enable result-correlated learning after a complete marker
+                # has actually traversed the PTY. Shell-name detection alone is
+                # insufficient when user prompt configuration overrides our hook.
+                self.result_reporting_enabled = True
                 self.command_result.emit(exit_code)
 
         cleaned = blob
