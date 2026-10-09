@@ -1128,13 +1128,19 @@
         return true;
       }
 
-      // Clicking again after selecting text copies the selection and removes
-      // the highlight; capture phase ensures xterm cannot eat the click first.
+      // Right mouse-down happens before the browser contextmenu event. Copy in
+      // capture phase so xterm cannot clear its selection first; remember that
+      // copy so the subsequent contextmenu does not turn into an accidental paste.
+      let rightClickCopiedSelection = false;
       terminalHost.addEventListener('mousedown', function(ev) {
+        rightClickCopiedSelection = false;
         const target = ev.target;
-        if (ev.button !== 0) return;
         if (target && target.closest && target.closest('.sshdock-tbl, #sshdock-suggestions')) return;
-        copyAndClearTerminalSelection();
+        if (ev.button === 2) {
+          rightClickCopiedSelection = copyAndClearTerminalSelection();
+          return;
+        }
+        if (ev.button === 0) copyAndClearTerminalSelection();
       }, true);
 
       terminalHost.addEventListener('contextmenu', function(ev) {
@@ -1142,6 +1148,10 @@
         if (target && target.closest && target.closest('.sshdock-tbl, #sshdock-suggestions')) return;
         ev.preventDefault();
         ev.stopPropagation();
+        if (rightClickCopiedSelection) {
+          rightClickCopiedSelection = false;
+          return;
+        }
         if (!copyAndClearTerminalSelection()) requestClipboardPaste();
       }, true);
 
